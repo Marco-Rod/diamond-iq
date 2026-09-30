@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: diamondiq-postgres
+
+    environment:
+      POSTGRES_DB: diamondiq
+      POSTGRES_USER: diamondiq
+      POSTGRES_PASSWORD: diamondiq
+
+    ports:
+      - "5432:5432"
+
+    
+    volumes:
+      - diamondiq_postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U diamondiq -d diamondiq"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    
+volumes:
+  diamondiq_postgres_data:
