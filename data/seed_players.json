@@ -1,0 +1,326 @@
+[
+  {
+    "mlb_id": 900001,
+    "name": "Ethan Carter",
+    "team": "NYY",
+    "position": "RF",
+    "contact": 86,
+    "power": 96,
+    "vision": 80,
+    "overall": 94,
+    "season_stats": [
+      {
+        "season": 2026,
+        "games": 150,
+        "plate_appearances": 650,
+        "hits": 171,
+        "home_runs": 48,
+        "rbi": 118,
+        "walks": 91,
+        "strikeouts": 142,
+        "avg": "0.294",
+        "obp": "0.398",
+        "slg": "0.617",
+        "ops": "1.015",
+        "woba": "0.421"
+      }
+    ]
+  },
+  {
+    "mlb_id": 900002,
+    "name": "Lucas Bennett",
+    "team": "NYY",
+    "position": "SS",
+    "contact": 91,
+    "power": 62,
+    "vision": 92,
+    "overall": 87,
+    "season_stats": [
+      {
+        "season": 2026,
+        "games": 146,
+        "plate_appearances": 612,
+        "hits": 168,
+        "home_runs": 14,
+        "rbi": 71,
+        "walks": 66,
+        "strikeouts": 88,
+        "avg": "0.312",
+        "obp": "0.391",
+        "slg": "0.447",
+        "ops": "0.838",
+        "woba": "0.366"
+      }
+    ]
+  },
+  {
+    "mlb_id": 900003,
+    "name": "Noah Mitchell",
+    "team": "NYY",
+    "position": "1B",
+    "contact": 72,
+    "power": 89,
+    "vision": 68,
+    "overall": 85,
+    "season_stats": [
+      {
+        "season": 2026,
+        "games": 143,
+        "plate_appearances": 590,
+        "hits": 139,
+        "home_runs": 36,
+        "rbi": 103,
+        "walks": 61,
+        "strikeouts": 154,
+        "avg": "0.265",
+        "obp": "0.342",
+        "slg": "0.531",
+        "ops": "0.873",
+        "woba": "0.374"
+      }
+    ]
+  },
+  {
+    "mlb_id": 900004,
+    "name": "Daniel Brooks",
+    "team": "NYY",
+    "position": "CF",
+    "contact": 78,
+    "power": 74,
+    "vision": 83,
+    "overall": 82,
+    "season_stats": [
+      {
+        "season": 2026,
+        "games": 138,
+        "plate_appearances": 558,
+        "hits": 142,
+        "home_runs": 21,
+        "rbi": 68,
+        "walks": 57,
+        "strikeouts": 104,
+        "avg": "0.281",
+        "obp": "0.354",
+        "slg": "0.468",
+        "ops": "0.822",
+        "woba": "0.351"
+      }
+    ]
+  },
+  {
+    "mlb_id": 900005,
+    "name": "Mateo Rivera",
+    "team": "LAD",
+    "position": "DH",
+    "contact": 94,
+    "power": 98,
+    "vision": 91,
+    "overall": 98,
+    "season_stats": [
+      {
+        "season": 2026,
+        "games": 154,
+        "plate_appearances": 676,
+        "hits": 182,
+        "home_runs": 51,
+        "rbi": 126,
+        "walks": 102,
+        "strikeouts": 129,
+        "avg": "0.316",
+        "obp": "0.424",
+        "slg": "0.654",
+        "ops": "1.078",
+        "woba": "0.438"
+      }
+    ]
+  },
+  {
+    "mlb_id": 900006,
+    "name": "Oliver Grant",
+    "team": "LAD",
+    "position": "2B",
+    "contact": 88,
+    "power": 79,
+    "vision": 89,
+    "overall": 89,
+    "season_stats": [
+      {
+        "season": 2026,
+        "games": 148,
+        "plate_appearances": 625,
+        "hits": 169,
+        "home_runs": 25,
+        "rbi": 82,
+        "walks": 78,
+        "strikeouts": 93,
+        "avg": "0.302",
+        "obp": "0.389",
+        "slg": "0.493",
+        "ops": "0.882",
+        "woba": "0.379"
+      }
+    ]
+  },
+  {
+    "mlb_id": 900007,
+    "name": "Samuel Ortiz",
+    "team": "BOS",
+    "position": "LF",
+    "contact": 83,
+    "power": 84,
+    "vision": 77,
+    "overall": 86,
+    "season_stats": [
+      {
+        "season": 2026,
+        "games": 145,
+        "plate_appearances": 601,
+        "hits": 154,
+        "home_runs": 29,
+        "rbi": 91,
+        "walks": 62,
+        "strikeouts": 120,
+        "avg": "0.287",
+        "obp": "0.359",
+        "slg": "0.506",
+        "ops": "0.865",
+        "woba": "0.369"
+      }
+    ]
+  },
+  {
+    "mlb_id": 900008,
+    "name": "Adrian Cole",
+    "team": "HOU",
+    "position": "3B",
+    "contact": 68,
+    "power": 91,
+    "vision": 64,
+    "overall": 84,
+    "season_stats": [
+      {
+        "season": 2026,
+        "games": 140,
+        "plate_appearances": 572,
+        "hits": 128,
+        "home_runs": 39,
+        "rbi": 108,
+        "walks": 55,
+        "strikeouts": 168,
+        "avg": "0.251",
+        "obp": "0.326",
+        "slg": "0.548",
+        "ops": "0.874",
+        "woba": "0.371"
+      }
+    ]
+  },
+  {
+    "mlb_id": 900009,
+    "name": "Gabriel Foster",
+    "team": "ATL",
+    "position": "CF",
+    "contact": 92,
+    "power": 58,
+    "vision": 95,
+    "overall": 86,
+    "season_stats": [
+      {
+        "season": 2026,
+        "games": 151,
+        "plate_appearances": 638,
+        "hits": 180,
+        "home_runs": 11,
+        "rbi": 61,
+        "walks": 81,
+        "strikeouts": 76,
+        "avg": "0.321",
+        "obp": "0.407",
+        "slg": "0.438",
+        "ops": "0.845",
+        "woba": "0.373"
+      }
+    ]
+  },
+  {
+    "mlb_id": 900010,
+    "name": "Julian Hayes",
+    "team": "SD",
+    "position": "RF",
+    "contact": 79,
+    "power": 87,
+    "vision": 75,
+    "overall": 86,
+    "season_stats": [
+      {
+        "season": 2026,
+        "games": 147,
+        "plate_appearances": 610,
+        "hits": 151,
+        "home_runs": 34,
+        "rbi": 99,
+        "walks": 69,
+        "strikeouts": 133,
+        "avg": "0.276",
+        "obp": "0.356",
+        "slg": "0.529",
+        "ops": "0.885",
+        "woba": "0.378"
+      }
+    ]
+  },
+  {
+    "mlb_id": 900011,
+    "name": "Max Muncy",
+    "team": "SEA",
+    "position": "3B",
+    "contact": 76,
+    "power": 81,
+    "vision": 72,
+    "overall": 81,
+    "season_stats": [
+      {
+        "season": 2026,
+        "games": 131,
+        "plate_appearances": 521,
+        "hits": 119,
+        "home_runs": 26,
+        "rbi": 78,
+        "walks": 59,
+        "strikeouts": 127,
+        "avg": "0.263",
+        "obp": "0.348",
+        "slg": "0.482",
+        "ops": "0.830",
+        "woba": "0.355"
+      }
+    ]
+  },
+  {
+    "mlb_id": 900012,
+    "name": "Max Muncy",
+    "team": "OAK",
+    "position": "2B",
+    "contact": 71,
+    "power": 69,
+    "vision": 74,
+    "overall": 75,
+    "season_stats": [
+      {
+        "season": 2026,
+        "games": 118,
+        "plate_appearances": 446,
+        "hits": 101,
+        "home_runs": 16,
+        "rbi": 54,
+        "walks": 49,
+        "strikeouts": 111,
+        "avg": "0.258",
+        "obp": "0.341",
+        "slg": "0.421",
+        "ops": "0.762",
+        "woba": "0.334"
+      }
+    ]
+  }
+]

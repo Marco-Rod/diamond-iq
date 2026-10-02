@@ -1,0 +1,25 @@
+[project]
+name = "diamond-iq"
+version = "0.1.0"
+description = "Baseball analytics backend with LLM integration."
+requires-python = ">=3.14"
+
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlalchemy[asyncio]",
+    "asyncpg",
+    "psycopg[binary]",
+    "alembic",
+    "pydantic-settings",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "httpx",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
