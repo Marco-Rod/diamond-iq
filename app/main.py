@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from app.api.v1.ai import router as ai_router
 from app.api.v1.players import router as players_router
 
 app = FastAPI(
@@ -22,5 +23,10 @@ async def health() -> dict[str, str]:
 
 app.include_router(
     players_router,
+    prefix="/api/v1",
+)
+
+app.include_router(
+    ai_router,
     prefix="/api/v1",
 )
