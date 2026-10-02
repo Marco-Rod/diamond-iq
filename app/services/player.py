@@ -6,6 +6,13 @@ from app.repositories.player import PlayerRepository
 from app.schemas.player import PlayerCreate
 
 
+class UnsupportedPlayerMetricError(Exception):
+    """
+    Se lanza cuando una consulta intenta utilizar un rating
+    que Diamond IQ no reconoce como métrica válida.
+    """
+
+
 class PlayerAlreadyExistsError(Exception):
     """
     Se lanza cuando intentamos crear un jugador cuyo `mlb_id`
@@ -138,9 +145,7 @@ class PlayerService:
         player = await self.repository.get_by_id(player_id)
 
         if player is None:
-            raise PlayerNotFoundError(
-                f"Player {player_id} was not found."
-            )
+            raise PlayerNotFoundError(f"Player {player_id} was not found.")
 
         return player
 
@@ -155,9 +160,7 @@ class PlayerService:
         player = await self.repository.get_with_stats(player_id)
 
         if player is None:
-            raise PlayerNotFoundError(
-                f"Player {player_id} was not found."
-            )
+            raise PlayerNotFoundError(f"Player {player_id} was not found.")
 
         return player
 
@@ -173,3 +176,59 @@ class PlayerService:
         """
 
         return await self.repository.get_by_name(name)
+
+
+    async def get_top_players(
+        self,
+        *,
+        metric: str,
+        team: str | None = None,
+        limit: int = 3,
+    ) -> list[Player]:
+        """
+        Recupera los jugadores mejor evaluados según una métrica.
+
+        El service valida parámetros de negocio antes de delegar
+        la consulta al repository.
+        """
+
+        allowed_metrics = {
+            "contact",
+            "power",
+            "vision",
+            "overall",
+        }
+
+        if metric not in allowed_metrics:
+            raise UnsupportedPlayerMetricError(f"Unsupported player metric: {metric}")
+
+        if limit < 1 or limit > 20:
+            raise ValueError("limit must be between 1 and 20")
+
+        return await self.repository.get_top_players(
+            metric=metric,
+            team=team,
+            limit=limit,
+        )
+
+
+    async def find_players_by_rating_profile(
+        self,
+        *,
+        min_contact: int | None = None,
+        max_power: int | None = None,
+        limit: int = 20,
+    ) -> list[Player]:
+        """
+        Recupera jugadores que coincidan con un perfil de ratings.
+
+        Esta operación representa una consulta de dominio, no una consulta
+        SQL libre. Las futuras tools del LLM podrán reutilizarla de manera
+        segura.
+        """
+
+        return await self.repository.get_players_by_rating_profile(
+            min_contact=min_contact,
+            max_power=max_power,
+            limit=limit,
+        )

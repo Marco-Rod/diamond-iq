@@ -9,6 +9,7 @@ from app.services.player import (
     PlayerAlreadyExistsError,
     PlayerNotFoundError,
     PlayerService,
+    UnsupportedPlayerMetricError,
 )
 
 
@@ -192,3 +193,69 @@ async def test_create_player_rolls_back_on_integrity_error(
 
     mock_session.rollback.assert_awaited_once()
     mock_session.commit.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_get_top_players_returns_repository_results(
+    service: PlayerService,
+) -> None:
+    """
+    El service debe delegar correctamente una consulta válida
+    de top players al repository.
+    """
+
+    players = [
+        Player(
+            id=1,
+            mlb_id=900001,
+            name="Ethan Carter",
+            team="NYY",
+            power=96,
+        ),
+        Player(
+            id=2,
+            mlb_id=900003,
+            name="Noah Mitchell",
+            team="NYY",
+            power=89,
+        ),
+    ]
+
+    service.repository.get_top_players = AsyncMock(
+        return_value=players,
+    )
+
+    result = await service.get_top_players(
+        metric="power",
+        team="NYY",
+        limit=2,
+    )
+
+    assert result == players
+
+    service.repository.get_top_players.assert_awaited_once_with(
+        metric="power",
+        team="NYY",
+        limit=2,
+    )
+
+
+@pytest.mark.anyio
+async def test_get_top_players_rejects_unsupported_metric(
+    service: PlayerService,
+) -> None:
+    """
+    El service debe impedir que métricas no autorizadas
+    lleguen hasta la capa de persistencia.
+    """
+
+    service.repository.get_top_players = AsyncMock()
+
+    with pytest.raises(UnsupportedPlayerMetricError):
+        await service.get_top_players(
+            metric="salary",
+            team="NYY",
+            limit=3,
+        )
+
+    service.repository.get_top_players.assert_not_awaited()

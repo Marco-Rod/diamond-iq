@@ -9,7 +9,6 @@ from sqlalchemy import select
 from app.db.models import Player, PlayerSeasonStats
 from app.db.session import AsyncSessionFactory
 
-
 # `Path` nos permite localizar el archivo independientemente del sistema
 # operativo y evita construir rutas manualmente con "\" o "/".
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -159,11 +158,7 @@ async def seed_players() -> None:
         # dejar un seed aplicado parcialmente.
         await session.commit()
 
-    print(
-        f"Seed completed: "
-        f"{created_players} created, "
-        f"{skipped_players} skipped."
-    )
+    print(f"Seed completed: {created_players} created, {skipped_players} skipped.")
 
 
 if __name__ == "__main__":

@@ -56,8 +56,8 @@ class PlayerRepository:
         return result.scalar_one_or_none()
 
     async def get_by_name(
-    self,
-    name: str,
+        self,
+        name: str,
     ) -> list[Player]:
         """
         Recupera todos los jugadores cuyo nombre coincide exactamente.
@@ -70,11 +70,7 @@ class PlayerRepository:
         `id` o `mlb_id`.
         """
 
-        statement = (
-            select(Player)
-            .where(Player.name == name)
-            .order_by(Player.id)
-        )
+        statement = select(Player).where(Player.name == name).order_by(Player.id)
 
         result = await self.session.execute(statement)
 
@@ -93,12 +89,7 @@ class PlayerRepository:
         `offset` permite implementar paginación básica desde la API.
         """
 
-        statement = (
-            select(Player)
-            .order_by(Player.name)
-            .limit(limit)
-            .offset(offset)
-        )
+        statement = select(Player).order_by(Player.name).limit(limit).offset(offset)
 
         result = await self.session.execute(statement)
 
@@ -160,3 +151,87 @@ class PlayerRepository:
         await self.session.flush()
 
         return player
+
+    async def get_top_players(
+    self,
+    *,
+    metric: str,
+    team: str | None = None,
+    limit: int = 3,
+    ) -> list[Player]:
+        """
+        Devuelve jugadores ordenados de mayor a menor según un rating.
+
+        `metric` no se utiliza directamente como SQL arbitrario. Solo
+        permitimos atributos conocidos del modelo para evitar consultas
+        dinámicas inseguras.
+
+        Esta función será especialmente útil más adelante para tools como
+        `get_top_players`.
+        """
+
+        allowed_metrics = {
+            "contact": Player.contact,
+            "power": Player.power,
+            "vision": Player.vision,
+            "overall": Player.overall,
+        }
+
+        metric_column = allowed_metrics.get(metric)
+
+        if metric_column is None:
+            raise ValueError(f"Unsupported player metric: {metric}")
+
+        statement = select(Player)
+
+        if team is not None:
+            statement = statement.where(
+                Player.team == team,
+            )
+
+        statement = (
+            statement.where(metric_column.is_not(None))
+            .order_by(metric_column.desc())
+            .limit(limit)
+        )
+
+        result = await self.session.execute(statement)
+
+        return list(result.scalars().all())
+
+
+    async def get_players_by_rating_profile(
+        self,
+        *,
+        min_contact: int | None = None,
+        max_power: int | None = None,
+        limit: int = 20,
+    ) -> list[Player]:
+        """
+        Busca jugadores que cumplan determinadas condiciones de ratings.
+
+        Esta primera versión soporta el caso de demo:
+        jugadores con Contact alto y Power bajo.
+
+        Las condiciones se construyen de forma explícita en backend;
+        no aceptamos SQL ni expresiones arbitrarias provenientes del usuario
+        o del futuro LLM.
+        """
+
+        statement = select(Player)
+
+        if min_contact is not None:
+            statement = statement.where(
+                Player.contact >= min_contact,
+            )
+
+        if max_power is not None:
+            statement = statement.where(
+                Player.power <= max_power,
+            )
+
+        statement = statement.order_by(Player.contact.desc()).limit(limit)
+
+        result = await self.session.execute(statement)
+
+        return list(result.scalars().all())
