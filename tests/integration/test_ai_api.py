@@ -1,47 +1,79 @@
+from unittest.mock import AsyncMock
+
 from fastapi.testclient import TestClient
 
+from app.ai.schemas import (
+    ChatResponse,
+    ProviderMetadata,
+    UsageInfo,
+)
+from app.api.v1.ai import get_ai_service
 from app.main import app
-
 
 client = TestClient(app)
 
 
-def test_chat_returns_stable_response_contract() -> None:
+def test_chat_returns_llm_response() -> None:
     """
-    Verifica que el endpoint de IA respete el contrato público
-    antes de conectar proveedores reales.
+    Verifica el contrato HTTP sin realizar una llamada real al LLM.
+
+    Sustituimos AIService por un mock para que la suite permanezca
+    rápida y determinista.
     """
 
-    response = client.post(
-        "/api/v1/ai/chat",
-        json={
-            "message": "¿Quién tiene mayor Power en Yankees?"
-        },
+    mock_service = AsyncMock()
+
+    mock_service.chat.return_value = ChatResponse(
+        answer="Ethan Carter has the highest Power.",
+        provider=ProviderMetadata(
+            provider="ollama",
+            model="qwen2.5-coder:7b",
+        ),
+        usage=UsageInfo(
+            input_tokens=50,
+            output_tokens=12,
+        ),
     )
 
-    assert response.status_code == 200
+    async def override_ai_service():
+        return mock_service
 
-    body = response.json()
+    app.dependency_overrides[get_ai_service] = override_ai_service
 
-    assert "answer" in body
+    try:
+        response = client.post(
+            "/api/v1/ai/chat",
+            json={
+                "message": "Who has the highest Power?"
+            },
+        )
 
-    assert body["provider"]["provider"] == "stub"
-    assert body["provider"]["model"] == "none"
+        assert response.status_code == 200
 
-    assert body["tools_used"] == []
+        body = response.json()
 
-    assert body["usage"] == {
-        "input_tokens": 0,
-        "output_tokens": 0,
-    }
+        assert (
+            body["answer"]
+            == "Ethan Carter has the highest Power."
+        )
+
+        assert body["provider"] == {
+            "provider": "ollama",
+            "model": "qwen2.5-coder:7b",
+        }
+
+        assert body["usage"] == {
+            "input_tokens": 50,
+            "output_tokens": 12,
+        }
+
+        mock_service.chat.assert_awaited_once()
+
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_chat_rejects_empty_message() -> None:
-    """
-    FastAPI/Pydantic debe rechazar el request antes de ejecutar
-    lógica de IA si el mensaje no cumple el contrato.
-    """
-
     response = client.post(
         "/api/v1/ai/chat",
         json={

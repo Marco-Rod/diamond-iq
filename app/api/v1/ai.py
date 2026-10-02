@@ -1,18 +1,39 @@
 from typing import Annotated
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
 
-from app.ai.schemas import (
-    ChatRequest,
-    ChatResponse,
-    ProviderMetadata,
-    UsageInfo,
-)
+from app.ai.dependencies import get_llm_router
+from app.ai.router import LLMRouter
+from app.ai.schemas import ChatRequest, ChatResponse
+from app.ai.service import AIService
 
 router = APIRouter(
     prefix="/ai",
     tags=["ai"],
 )
+
+
+def get_ai_service(
+    router: Annotated[
+        LLMRouter,
+        Depends(get_llm_router),
+    ],
+) -> AIService:
+    """
+    Construye AIService utilizando el router configurado para el entorno.
+
+    FastAPI resuelve la cadena de dependencias automáticamente:
+
+    get_llm_router
+        ↓
+    LLMRouter
+        ↓
+    AIService
+        ↓
+    endpoint
+    """
+
+    return AIService(router)
 
 
 @router.post(
@@ -22,27 +43,13 @@ router = APIRouter(
 )
 async def chat(
     request: ChatRequest,
+    service: Annotated[
+        AIService,
+        Depends(get_ai_service),
+    ],
 ) -> ChatResponse:
     """
-    Endpoint inicial del asistente de Diamond IQ.
-
-    Esta primera versión todavía no llama a Ollama ni OpenAI.
-
-    Su objetivo es validar el contrato HTTP y dejar estable la superficie
-    pública de la API antes de introducir providers externos.
-
-    En la siguiente fase, esta implementación temporal será sustituida por
-    AIService + LLM Router + providers.
+    Envía una pregunta al asistente de Diamond IQ.
     """
 
-    return ChatResponse(
-        answer=(
-            "AI provider integration is not enabled yet. "
-            f"Received message: {request.message}"
-        ),
-        provider=ProviderMetadata(
-            provider="stub",
-            model="none",
-        ),
-        usage=UsageInfo(),
-    )
+    return await service.chat(request)
