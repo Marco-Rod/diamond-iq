@@ -2,6 +2,7 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from app.ai.guardrails import AIGuardrails
 from app.ai.limits import (
     AIExecutionLimits,
     TokenBudgetExceededError,
@@ -26,51 +27,53 @@ from app.ai.tools.exceptions import (
     ToolResultNotFoundError,
 )
 from app.ai.tools.registry import ToolRegistry
-from app.ai.guardrails import AIGuardrails
 from app.ai.usage import LLMUsageTracker
 
+# Se conserva por compatibilidad con tests y código existente.
+# La ejecución real utiliza AIExecutionLimits para controlar
+# el máximo de rondas de tool calling.
 MAX_TOOL_ITERATIONS = 3
-
-
 
 class AIService:
     """
     Orquesta una interacción completa con el asistente de Diamond IQ.
 
-    Esta versión soporta el primer flujo de Tool Calling:
+    El flujo soporta Tool Calling iterativo:
 
     1. envía la pregunta y las tools disponibles al LLM;
-    2. detecta si el modelo solicita una tool;
-    3. valida y ejecuta la tool mediante ToolRegistry;
-    4. devuelve el resultado de la tool al modelo;
-    5. obtiene la respuesta final para el usuario.
+    2. detecta si el modelo solicita una o varias tools;
+    3. valida y ejecuta cada tool mediante ToolRegistry;
+    4. devuelve los resultados de las tools al modelo;
+    5. repite el ciclo cuando sea necesario;
+    6. valida y devuelve la respuesta final al usuario.
 
     El LLM nunca ejecuta directamente lógica de negocio ni SQL.
     """
-    
+
     def __init__(
-    self,
-    router: LLMRouter,
-    tool_registry: ToolRegistry,
-    usage_tracker: LLMUsageTracker,
-    guardrails: AIGuardrails,
-    limits: AIExecutionLimits | None = None,
+        self,
+        router: LLMRouter,
+        tool_registry: ToolRegistry,
+        usage_tracker: LLMUsageTracker,
+        guardrails: AIGuardrails,
+        limits: AIExecutionLimits | None = None,
     ) -> None:
         self.router = router
         self.tool_registry = tool_registry
         self.usage_tracker = usage_tracker
         self.temperature = 0.2
         self.guardrails = guardrails
+
         # El valor por defecto mantiene los tests y usos simples cómodos,
         # pero permite inyectar límites distintos por entorno.
         self.limits = limits or AIExecutionLimits()
-    
+
     def _build_tool_error_message(
-    self,
-    *,
-    tool_name: str,
-    error_type: str,
-    message: str,
+        self,
+        *,
+        tool_name: str,
+        error_type: str,
+        message: str,
     ) -> dict[str, Any]:
         """
         Construye un resultado de tool recuperable para el LLM.
@@ -96,10 +99,10 @@ class AIService:
                 ensure_ascii=False,
             ),
         }
-    
+
     def _build_assistant_tool_message(
-    self,
-    response: LLMResponse,
+        self,
+        response: LLMResponse,
     ) -> dict[str, Any]:
         """
         Reconstruye el mensaje del assistant que originó las tool calls.
@@ -119,6 +122,7 @@ class AIService:
                     "arguments": tool_call.arguments,
                 },
             )
+
             serialized_call: dict[str, Any] = {
                 "function": {
                     "name": tool_call.name,
@@ -131,7 +135,7 @@ class AIService:
             # a generarlo.
             if tool_call.id is not None:
                 serialized_call["id"] = tool_call.id
-            
+
             tool_calls.append(serialized_call)
 
         return {
@@ -141,12 +145,12 @@ class AIService:
         }
 
     def _build_chat_response(
-    self,
-    *,
-    llm_response: LLMResponse,
-    tool_executions: list[ToolExecution],
-    input_tokens: int,
-    output_tokens: int,
+        self,
+        *,
+        llm_response: LLMResponse,
+        tool_executions: list[ToolExecution],
+        input_tokens: int,
+        output_tokens: int,
     ) -> ChatResponse:
         """
         Convierte la última respuesta interna del provider en el contrato
@@ -179,16 +183,18 @@ class AIService:
         Limitamos el número de rondas para evitar que un modelo entre
         accidentalmente en un ciclo infinito de llamadas.
         """
+
         conversation_id = str(uuid4())
+
         # Estado específico del provider que esté controlando
         # la conversación actual.
         #
         # AIService únicamente lo transporta entre llamadas:
         # nunca debe interpretar su contenido.
         provider_state: LLMProviderState | None = None
-        self.guardrails.validate_input(
-            request.message
-        )
+
+        self.guardrails.validate_input(request.message)
+
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
@@ -201,14 +207,13 @@ class AIService:
         ]
 
         tool_definitions = self.tool_registry.definitions()
-
         tool_executions: list[ToolExecution] = []
 
         total_input_tokens = 0
         total_output_tokens = 0
         tool_call_count = 0
-        
-        # MAX_TOOL_ITERATIONS limita las rondas que pueden ejecutar tools.
+
+        # max_tool_iterations limita las rondas que pueden ejecutar tools.
         #
         # Permitimos una llamada adicional al LLM después de la última
         # ronda para que pueda producir la respuesta final.
@@ -218,20 +223,20 @@ class AIService:
             llm_request = LLMRequest(
                 messages=messages,
                 temperature=self.temperature,
-                tools=self.tool_registry.definitions(),
+                tools=tool_definitions,
                 provider_state=provider_state,
             )
 
             llm_response = await self.router.generate(
                 llm_request,
             )
+
             # Conservamos el estado devuelto por el provider.
             #
             # Por ejemplo, Gemini puede guardar aquí su interaction_id.
             # AIService no necesita saber qué representa.
-            provider_state = (
-                llm_response.provider_state
-            )
+            provider_state = llm_response.provider_state
+
             await self.usage_tracker.record_call(
                 conversation_id=conversation_id,
                 provider=llm_response.provider,
@@ -242,13 +247,14 @@ class AIService:
                     llm_response.tool_calls
                 ),
             )
-            
+
             total_input_tokens += llm_response.input_tokens
             total_output_tokens += llm_response.output_tokens
             total_tokens = (
                 total_input_tokens
                 + total_output_tokens
             )
+
             tool_call_count += len(
                 llm_response.tool_calls
             )
@@ -261,7 +267,7 @@ class AIService:
                     "The conversation exceeded the maximum "
                     "number of tool calls."
                 )
-                
+
             if (
                 llm_response.tool_calls
                 and total_tokens
@@ -270,10 +276,18 @@ class AIService:
                 raise TokenBudgetExceededError(
                     "The conversation exhausted its token budget."
                 )
-            # Si el modelo ya no solicita ninguna herramienta,
-            # consideramos que terminó su razonamiento y devolvemos
-            # la respuesta final al cliente.
+
+            # Si el modelo ya no solicita ninguna tool, tenemos una
+            # respuesta final destinada al usuario.
+            #
+            # Solo en este punto aplicamos el guardrail de salida. Una
+            # respuesta intermedia con tool calls puede tener content vacío
+            # o None y eso es completamente válido dentro del flujo agente.
             if not llm_response.tool_calls:
+                self.guardrails.validate_output(
+                    llm_response.content
+                )
+
                 return self._build_chat_response(
                     llm_response=llm_response,
                     tool_executions=tool_executions,
@@ -289,9 +303,6 @@ class AIService:
                     "of tool-calling iterations."
                 )
 
-            self.guardrails.validate_output(
-                llm_response.content
-            )
             # Primero registramos en el historial qué tools solicitó
             # el asistente.
             messages.append(
@@ -307,10 +318,12 @@ class AIService:
                         name=tool_call.name,
                         arguments=tool_call.arguments,
                     )
+
                     print(
                         f"TOOL RESULT [{tool_call.name}]:",
                         tool_result,
                     )
+
                 except ToolArgumentsError as exc:
                     """
                     El modelo utilizó una tool existente, pero construyó
@@ -366,11 +379,11 @@ class AIService:
 
                 except ToolResultNotFoundError as exc:
                     """
-                    La tool era válida, pero no pudo encontrar la entidad o información
-                    solicitada.
+                    La tool era válida, pero no pudo encontrar la entidad o
+                    información solicitada.
 
-                    Se devuelve el error al modelo para permitirle corregir su siguiente
-                    acción utilizando el historial disponible.
+                    Se devuelve el error al modelo para permitirle corregir su
+                    siguiente acción utilizando el historial disponible.
                     """
 
                     tool_executions.append(
@@ -390,6 +403,7 @@ class AIService:
                     )
 
                     continue
+
                 # Cualquier excepción distinta a las anteriores se propaga.
                 #
                 # Eso es deliberado: no debemos convertir un bug, una caída
@@ -411,7 +425,6 @@ class AIService:
                         # cada resultado con el function_call exacto que
                         # originó la ejecución.
                         "tool_call_id": tool_call.id,
-
                         "name": tool_call.name,
                         "content": json.dumps(
                             tool_result,

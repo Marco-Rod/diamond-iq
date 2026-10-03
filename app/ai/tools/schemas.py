@@ -194,3 +194,32 @@ class PlayerComparisonResult(BaseModel):
     position: str | None = None
 
     ratings: dict[PlayerRatingMetric, int | None]
+
+
+class SearchKnowledgeArguments(BaseModel):
+    """
+    Argumentos para buscar información semánticamente
+    relacionada dentro de la base de conocimiento.
+    """
+
+    query: str = Field(
+        min_length=1,
+        max_length=500,
+    )
+
+    limit: int = Field(
+        default=3,
+        ge=1,
+        le=5,
+    )
+
+
+class KnowledgeSearchResult(BaseModel):
+    """
+    Fragmento recuperado desde la base de conocimiento
+    junto con su fuente y score de similitud.
+    """
+
+    source: str
+    content: str
+    score: float

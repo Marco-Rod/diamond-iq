@@ -859,3 +859,156 @@ async def test_chat_can_recover_from_tool_result_not_found() -> None:
     ]
 
     assert response.tools_used[1].error == "result_not_found"
+
+
+@pytest.mark.anyio
+async def test_chat_does_not_validate_output_before_tool_execution() -> None:
+    """
+    Verifica que una respuesta intermedia que contiene tool calls
+    no sea tratada como una respuesta final para el usuario.
+
+    Un provider puede devolver una tool call sin contenido textual.
+    En ese caso, AIService debe ejecutar primero la tool y continuar
+    la conversación con el LLM.
+
+    El guardrail de salida solo debe validar la respuesta final,
+    cuando ya no existen tool calls pendientes.
+    """
+
+    # El router es asíncrono porque generate() realiza la llamada
+    # al provider de LLM.
+    router = AsyncMock()
+
+    # ToolRegistry mezcla métodos síncronos y asíncronos:
+    #
+    # - definitions() es síncrono y devuelve las tools disponibles.
+    # - execute() es asíncrono porque algunas tools acceden a BD,
+    #   embeddings u otros recursos async.
+    tool_registry = Mock()
+    tool_registry.execute = AsyncMock()
+
+    # Simulamos el resultado real que devolvería search_knowledge
+    # después de recuperar información desde la base de conocimiento.
+    tool_registry.execute.return_value = [
+        {
+            "source": "ratings.md",
+            "content": (
+                "Power represents a hitter's ability "
+                "to produce power when making contact."
+            ),
+            "score": 0.82,
+        }
+    ]
+
+    # definitions() debe devolver una lista normal, no una coroutine.
+    tool_registry.definitions.return_value = [
+        {
+            "type": "function",
+            "function": {
+                "name": "search_knowledge",
+                "description": (
+                    "Search Diamond IQ knowledge."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                        },
+                        "limit": {
+                            "type": "integer",
+                        },
+                    },
+                    "required": [
+                        "query",
+                    ],
+                },
+            },
+        }
+    ]
+
+    usage_tracker = AsyncMock()
+
+    # Usamos un Mock normal porque los métodos de AIGuardrails
+    # son validaciones síncronas.
+    guardrails = Mock(
+        spec=AIGuardrails
+    )
+
+    # Primera respuesta del modelo:
+    #
+    # El modelo todavía no responde al usuario.
+    # Solicita ejecutar search_knowledge y por ello puede devolver
+    # content vacío.
+    #
+    # Segunda respuesta:
+    #
+    # Después de recibir el resultado de la tool, el modelo genera
+    # la respuesta textual final.
+    router.generate.side_effect = [
+        LLMResponse(
+            content="",
+            provider="gemini",
+            model="gemini-3.8-flash",
+            tool_calls=[
+                LLMToolCall(
+                    id="call-1",
+                    name="search_knowledge",
+                    arguments={
+                        "query": (
+                            "What does Power mean "
+                            "in Diamond IQ?"
+                        ),
+                        "limit": 3,
+                    },
+                )
+            ],
+        ),
+        LLMResponse(
+            content=(
+                "Power represents a hitter's ability "
+                "to produce power when making contact."
+            ),
+            provider="gemini",
+            model="gemini-3.8-flash",
+        ),
+    ]
+
+    service = AIService(
+        router=router,
+        tool_registry=tool_registry,
+        usage_tracker=usage_tracker,
+        guardrails=guardrails,
+        limits=AIExecutionLimits(),
+    )
+
+    await service.chat(
+        ChatRequest(
+            message=(
+                "What does Power mean "
+                "in Diamond IQ?"
+            )
+        )
+    )
+
+    # La tool debe haberse ejecutado utilizando exactamente
+    # los argumentos solicitados por el modelo.
+    tool_registry.execute.assert_awaited_once_with(
+        name="search_knowledge",
+        arguments={
+            "query": (
+                "What does Power mean "
+                "in Diamond IQ?"
+            ),
+            "limit": 3,
+        },
+    )
+
+    # El output vacío de la primera respuesta NO debe validarse.
+    #
+    # validate_output() debe ejecutarse una sola vez y únicamente
+    # sobre la respuesta final destinada al usuario.
+    guardrails.validate_output.assert_called_once_with(
+        "Power represents a hitter's ability "
+        "to produce power when making contact."
+    )
