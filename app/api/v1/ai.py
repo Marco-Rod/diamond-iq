@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.dependencies import get_llm_router
+from app.ai.guardrails import AIGuardrailError, AIGuardrails
 from app.ai.limits import AIExecutionLimitError
 from app.ai.providers.exceptions import (
     LLMProviderTransientError,
@@ -55,12 +56,16 @@ def get_ai_service(
         max_tool_calls_per_chat=settings.ai_max_tool_calls_per_chat,
         max_total_tokens_per_chat=settings.ai_max_total_tokens_per_chat,
     )
+    guardrails = AIGuardrails(
+        max_input_length=2000,
+    )
 
     return AIService(
         router=router,
         tool_registry=tool_registry,
         usage_tracker=usage_tracker,
         limits=limits,
+        guardrails=guardrails,
     )
 
 
@@ -90,4 +95,10 @@ async def chat(
             detail=(
                 "The AI provider is temporarily unavailable."
             ),
+        ) from exc
+
+    except AIGuardrailError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
         ) from exc
