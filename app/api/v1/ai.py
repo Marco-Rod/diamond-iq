@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -8,6 +9,18 @@ from app.ai.guardrails import AIGuardrailError, AIGuardrails
 from app.ai.limits import AIExecutionLimitError
 from app.ai.providers.exceptions import (
     LLMProviderTransientError,
+)
+from app.ai.rag.embeddings import (
+    OllamaEmbeddingProvider,
+)
+from app.ai.rag.loader import (
+    KnowledgeLoader,
+)
+from app.ai.rag.retriever import (
+    KnowledgeRetriever,
+)
+from app.ai.rag.store import (
+    InMemoryVectorStore,
 )
 from app.ai.router import LLMRouter
 from app.ai.schemas import ChatRequest, ChatResponse
@@ -43,9 +56,32 @@ def get_ai_service(
     settings = get_settings()
 
     player_service = PlayerService(session)
-
+    knowledge_retriever = (
+        KnowledgeRetriever(
+            loader=KnowledgeLoader(
+                knowledge_dir=Path(
+                    "knowledge"
+                ),
+            ),
+            embeddings=OllamaEmbeddingProvider(
+                base_url=(
+                    settings.ollama_base_url
+                ),
+                model=(
+                    settings.ollama_embedding_model
+                ),
+                timeout_seconds=(
+                    settings.ollama_embedding_timeout_seconds
+                ),
+            ),
+            store=InMemoryVectorStore(),
+        )
+    )
     tool_registry = ToolRegistry(
         player_service=player_service,
+        knowledge_retriever=(
+            knowledge_retriever
+        ),
     )
 
     usage_tracker = LLMUsageTracker(
