@@ -125,11 +125,6 @@ class GetPlayerStatsArguments(BaseModel):
 
 
 class PlayerStatsResult(BaseModel):
-    """
-    Estadísticas ofensivas estructuradas que el LLM puede utilizar
-    para redactar una respuesta.
-    """
-
     player_id: int
     name: str
     season: int
@@ -142,11 +137,26 @@ class PlayerStatsResult(BaseModel):
     walks: int
     strikeouts: int
 
-    avg: Decimal | None = None
-    obp: Decimal | None = None
-    slg: Decimal | None = None
-    ops: Decimal | None = None
-    woba: Decimal | None = None
+    avg: Decimal | None = Field(
+        default=None,
+        serialization_alias="AVG",
+    )
+    obp: Decimal | None = Field(
+        default=None,
+        serialization_alias="OBP",
+    )
+    slg: Decimal | None = Field(
+        default=None,
+        serialization_alias="SLG",
+    )
+    ops: Decimal | None = Field(
+        default=None,
+        serialization_alias="OPS",
+    )
+    woba: Decimal | None = Field(
+        default=None,
+        serialization_alias="wOBA",
+    )
 
 
 class ComparePlayersArguments(BaseModel):

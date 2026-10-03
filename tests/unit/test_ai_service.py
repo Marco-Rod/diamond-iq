@@ -7,7 +7,7 @@ from app.ai.schemas import (
     LLMResponse,
     LLMToolCall,
 )
-from app.ai.service import AIService
+from app.ai.service import MAX_TOOL_ITERATIONS, AIService, ToolIterationLimitError
 
 
 @pytest.mark.anyio
@@ -158,3 +158,230 @@ async def test_chat_executes_tool_and_requests_final_response() -> None:
     )
 
     assert router.generate.await_count == 2
+
+
+@pytest.mark.anyio
+async def test_chat_executes_multiple_tool_calls_in_same_iteration() -> None:
+    router = AsyncMock()
+
+    tool_registry = Mock()
+    tool_registry.definitions = Mock(
+        return_value=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_player",
+                },
+            }
+        ]
+    )
+    tool_registry.execute = AsyncMock()
+
+    first_response = LLMResponse(
+        content=None,
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=100,
+        output_tokens=20,
+        tool_calls=[
+            LLMToolCall(
+                id=None,
+                name="get_player",
+                arguments={
+                    "player_name": "Ethan Carter",
+                },
+            ),
+            LLMToolCall(
+                id=None,
+                name="get_player",
+                arguments={
+                    "player_name": "Mateo Rivera",
+                },
+            ),
+        ],
+    )
+
+    final_response = LLMResponse(
+        content="Ethan Carter and Mateo Rivera were found.",
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=150,
+        output_tokens=30,
+        finish_reason="stop",
+    )
+
+    router.generate.side_effect = [
+        first_response,
+        final_response,
+    ]
+
+    tool_registry.execute.side_effect = [
+        [
+            {
+                "name": "Ethan Carter",
+            }
+        ],
+        [
+            {
+                "name": "Mateo Rivera",
+            }
+        ],
+    ]
+
+    service = AIService(
+        router=router,
+        tool_registry=tool_registry,
+    )
+
+    response = await service.chat(
+        ChatRequest(
+            message="Tell me about Ethan Carter and Mateo Rivera."
+        )
+    )
+
+    assert router.generate.await_count == 2
+
+    assert tool_registry.execute.await_count == 2
+
+    assert len(response.tools_used) == 2
+
+    assert response.usage.input_tokens == 250
+    assert response.usage.output_tokens == 50
+
+
+@pytest.mark.anyio
+async def test_chat_can_request_another_tool_in_next_iteration() -> None:
+    router = AsyncMock()
+
+    tool_registry = Mock()
+    tool_registry.definitions = Mock(
+        return_value=[]
+    )
+    tool_registry.execute = AsyncMock()
+
+    first_response = LLMResponse(
+        content=None,
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=100,
+        output_tokens=20,
+        tool_calls=[
+            LLMToolCall(
+                id=None,
+                name="get_player",
+                arguments={
+                    "player_name": "Ethan Carter",
+                },
+            )
+        ],
+    )
+
+    second_response = LLMResponse(
+        content=None,
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=120,
+        output_tokens=20,
+        tool_calls=[
+            LLMToolCall(
+                id=None,
+                name="get_player_stats",
+                arguments={
+                    "player_name": "Ethan Carter",
+                    "season": 2026,
+                },
+            )
+        ],
+    )
+
+    final_response = LLMResponse(
+        content="Ethan Carter had a strong 2026 season.",
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=150,
+        output_tokens=40,
+    )
+
+    router.generate.side_effect = [
+        first_response,
+        second_response,
+        final_response,
+    ]
+
+    tool_registry.execute.side_effect = [
+        [{"name": "Ethan Carter"}],
+        [
+            {
+                "name": "Ethan Carter",
+                "season": 2026,
+            }
+        ],
+    ]
+
+    service = AIService(
+        router=router,
+        tool_registry=tool_registry,
+    )
+
+    response = await service.chat(
+        ChatRequest(
+            message="Tell me about Ethan Carter's 2026 season."
+        )
+    )
+
+    assert router.generate.await_count == 3
+    assert tool_registry.execute.await_count == 2
+
+    assert [
+        execution.name
+        for execution in response.tools_used
+    ] == [
+        "get_player",
+        "get_player_stats",
+    ]
+
+
+@pytest.mark.anyio
+async def test_chat_stops_after_maximum_tool_iterations() -> None:
+    router = AsyncMock()
+
+    tool_registry = Mock()
+    tool_registry.definitions = Mock(
+        return_value=[]
+    )
+    tool_registry.execute = AsyncMock(
+        return_value=[]
+    )
+
+    endless_tool_response = LLMResponse(
+        content=None,
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=10,
+        output_tokens=5,
+        tool_calls=[
+            LLMToolCall(
+                id=None,
+                name="get_player",
+                arguments={
+                    "player_name": "Ethan Carter",
+                },
+            )
+        ],
+    )
+
+    router.generate.return_value = endless_tool_response
+
+    service = AIService(
+        router=router,
+        tool_registry=tool_registry,
+    )
+
+    with pytest.raises(ToolIterationLimitError):
+        await service.chat(
+            ChatRequest(
+                message="Keep searching forever."
+            )
+        )
+
+    assert tool_registry.execute.await_count == MAX_TOOL_ITERATIONS

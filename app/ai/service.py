@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 from app.ai.prompts.system import SYSTEM_PROMPT
 from app.ai.router import LLMRouter
@@ -6,11 +7,23 @@ from app.ai.schemas import (
     ChatRequest,
     ChatResponse,
     LLMRequest,
+    LLMResponse,
     ProviderMetadata,
     ToolExecution,
     UsageInfo,
 )
 from app.ai.tools.registry import ToolRegistry
+
+MAX_TOOL_ITERATIONS = 3
+
+
+class ToolIterationLimitError(RuntimeError):
+    """
+    Se produce cuando el modelo continúa solicitando tools después
+    de alcanzar el máximo de rondas permitido.
+
+    El límite evita loops indefinidos entre el LLM y las herramientas.
+    """
 
 
 class AIService:
@@ -36,20 +49,83 @@ class AIService:
         self.router = router
         self.tool_registry = tool_registry
 
+    def _build_assistant_tool_message(
+    self,
+    response: LLMResponse,
+    ) -> dict[str, Any]:
+        """
+        Reconstruye el mensaje del assistant que originó las tool calls.
+
+        Este mensaje debe permanecer en el historial para que el modelo
+        pueda entender qué herramientas solicitó antes de recibir sus
+        resultados.
+        """
+
+        tool_calls: list[dict[str, Any]] = []
+
+        for tool_call in response.tool_calls:
+            serialized_call: dict[str, Any] = {
+                "function": {
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                }
+            }
+
+            # Algunos proveedores asignan un identificador a cada tool call.
+            # Lo conservamos cuando existe sin obligar a todos los providers
+            # a generarlo.
+            if tool_call.id is not None:
+                serialized_call["id"] = tool_call.id
+
+            tool_calls.append(serialized_call)
+
+        return {
+            "role": "assistant",
+            "content": response.content or "",
+            "tool_calls": tool_calls,
+        }
+
+    def _build_chat_response(
+    self,
+    *,
+    llm_response: LLMResponse,
+    tool_executions: list[ToolExecution],
+    input_tokens: int,
+    output_tokens: int,
+    ) -> ChatResponse:
+        """
+        Convierte la última respuesta interna del provider en el contrato
+        HTTP público utilizado por nuestra API.
+        """
+
+        return ChatResponse(
+            answer=llm_response.content or "",
+            provider=ProviderMetadata(
+                provider=llm_response.provider,
+                model=llm_response.model,
+            ),
+            tools_used=tool_executions,
+            usage=UsageInfo(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            ),
+        )
+
     async def chat(
         self,
         request: ChatRequest,
     ) -> ChatResponse:
         """
-        Ejecuta una conversación con soporte para una iteración de tools.
+        Ejecuta una conversación con Tool Calling iterativo.
 
-        Por ahora soportamos una única ronda de Tool Calling.
+        Una iteración representa una ronda en la que el modelo puede
+        solicitar una o varias tools.
 
-        Más adelante, en la fase del orquestador, permitiremos varias
-        iteraciones controladas mediante MAX_TOOL_ITERATIONS.
+        Limitamos el número de rondas para evitar que un modelo entre
+        accidentalmente en un ciclo infinito de llamadas.
         """
 
-        messages: list[dict[str, object]] = [
+        messages: list[dict[str, Any]] = [
             {
                 "role": "system",
                 "content": SYSTEM_PROMPT,
@@ -60,112 +136,85 @@ class AIService:
             },
         ]
 
-        first_request = LLMRequest(
-            messages=messages,
-            temperature=0.2,
-            tools=self.tool_registry.definitions(),
-        )
-
-        first_response = await self.router.generate(
-            first_request,
-        )
-
-        # Si el modelo responde directamente y no solicita ninguna tool,
-        # podemos devolver esa respuesta inmediatamente.
-        if not first_response.tool_calls:
-            return ChatResponse(
-                answer=first_response.content or "",
-                provider=ProviderMetadata(
-                    provider=first_response.provider,
-                    model=first_response.model,
-                ),
-                usage=UsageInfo(
-                    input_tokens=first_response.input_tokens,
-                    output_tokens=first_response.output_tokens,
-                ),
-            )
+        tool_definitions = self.tool_registry.definitions()
 
         tool_executions: list[ToolExecution] = []
 
-        # En esta primera versión manejamos únicamente la primera tool call.
+        total_input_tokens = 0
+        total_output_tokens = 0
+
+        # MAX_TOOL_ITERATIONS limita las rondas que pueden ejecutar tools.
         #
-        # Más adelante soportaremos múltiples llamadas e iteraciones
-        # utilizando un loop controlado.
-        tool_call = first_response.tool_calls[0]
-
-        tool_result = await self.tool_registry.execute(
-            name=tool_call.name,
-            arguments=tool_call.arguments,
-        )
-
-        tool_executions.append(
-            ToolExecution(
-                name=tool_call.name,
-                success=True,
+        # Permitimos una llamada adicional al LLM después de la última
+        # ronda para que pueda producir la respuesta final.
+        for iteration in range(MAX_TOOL_ITERATIONS + 1):
+            llm_request = LLMRequest(
+                messages=messages,
+                temperature=0.2,
+                tools=tool_definitions,
             )
-        )
 
-        # Añadimos al historial la decisión tomada por el modelo.
-        messages.append(
-            {
-                "role": "assistant",
-                "content": first_response.content or "",
-                "tool_calls": [
+            llm_response = await self.router.generate(
+                llm_request,
+            )
+
+            total_input_tokens += llm_response.input_tokens
+            total_output_tokens += llm_response.output_tokens
+
+            # Si el modelo ya no solicita ninguna herramienta,
+            # consideramos que terminó su razonamiento y devolvemos
+            # la respuesta final al cliente.
+            if not llm_response.tool_calls:
+                return self._build_chat_response(
+                    llm_response=llm_response,
+                    tool_executions=tool_executions,
+                    input_tokens=total_input_tokens,
+                    output_tokens=total_output_tokens,
+                )
+
+            # Si llegamos hasta aquí después de consumir todas las rondas
+            # permitidas, no ejecutamos más tools.
+            if iteration >= MAX_TOOL_ITERATIONS:
+                raise ToolIterationLimitError(
+                    "The model exceeded the maximum number "
+                    "of tool-calling iterations."
+                )
+
+            # Primero registramos en el historial qué tools solicitó
+            # el asistente.
+            messages.append(
+                self._build_assistant_tool_message(
+                    llm_response,
+                )
+            )
+
+            # Una misma respuesta del modelo puede solicitar varias tools.
+            for tool_call in llm_response.tool_calls:
+                tool_result = await self.tool_registry.execute(
+                    name=tool_call.name,
+                    arguments=tool_call.arguments,
+                )
+                tool_executions.append(
+                    ToolExecution(
+                        name=tool_call.name,
+                        success=True,
+                    )
+                )
+
+                # Cada resultado se incorpora como un mensaje independiente.
+                messages.append(
                     {
-                        "id": tool_call.id,
-                        "function": {
-                            "name": tool_call.name,
-                            "arguments": tool_call.arguments,
-                        },
+                        "role": "tool",
+                        "content": json.dumps(
+                            tool_result,
+                            ensure_ascii=False,
+                        ),
                     }
-                ],
-            }
-        )
+                )
 
-        # El resultado de la tool se devuelve como datos estructurados.
-        #
-        # El modelo recibe estos datos como contexto, pero no los obtiene
-        # directamente desde PostgreSQL.
-        messages.append(
-            {
-                "role": "tool",
-                "content": json.dumps(
-                    tool_result,
-                    ensure_ascii=False,
-                ),
-                "name": tool_call.name,
-            }
-        )
-
-        final_request = LLMRequest(
-            messages=messages,
-            temperature=0.2,
-            # En la segunda llamada no necesitamos volver a ofrecer tools
-            # para esta primera implementación de una sola iteración.
-            tools=[],
-        )
-
-        final_response = await self.router.generate(
-            final_request,
-        )
-
-        return ChatResponse(
-            answer=final_response.content or "",
-            provider=ProviderMetadata(
-                provider=final_response.provider,
-                model=final_response.model,
-            ),
-            tools_used=tool_executions,
-            usage=UsageInfo(
-                # Una interacción con tool calling utiliza dos requests al
-                # modelo, por lo que sumamos el consumo de ambos.
-                input_tokens=(
-                    first_response.input_tokens
-                    + final_response.input_tokens
-                ),
-                output_tokens=(
-                    first_response.output_tokens
-                    + final_response.output_tokens
-                ),
-            ),
+        # El flujo normal siempre termina dentro del loop.
+        # Esta excepción actúa como protección adicional ante cambios
+        # futuros en la lógica.
+        raise ToolIterationLimitError(
+            "Tool orchestration ended unexpectedly."
         )

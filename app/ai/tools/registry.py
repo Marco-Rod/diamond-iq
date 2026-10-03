@@ -140,7 +140,10 @@ class ToolRegistry:
 
             # Convertimos los modelos Pydantic a estructuras JSON-safe.
             return [
-                item.model_dump()
+                item.model_dump(
+                    mode="json",
+                    by_alias=True,
+                )
                 for item in result
             ]
 
@@ -160,7 +163,10 @@ class ToolRegistry:
             )
 
             return [
-                item.model_dump(mode="json")
+                item.model_dump(
+                    mode="json",
+                    by_alias=True,
+                )
                 for item in result
             ]
 
@@ -180,7 +186,10 @@ class ToolRegistry:
             )
 
             return [
-                item.model_dump(mode="json")
+                item.model_dump(
+                    mode="json",
+                    by_alias=True,
+                )
                 for item in result
             ]
 
@@ -200,7 +209,10 @@ class ToolRegistry:
             )
 
             return [
-                item.model_dump(mode="json")
+                item.model_dump(
+                    mode="json",
+                    by_alias=True,
+                )
                 for item in result
             ]
         

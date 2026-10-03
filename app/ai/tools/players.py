@@ -1,12 +1,12 @@
 from app.ai.tools.schemas import (
+    ComparePlayersArguments,
     GetPlayerArguments,
     GetPlayerStatsArguments,
     GetTopPlayersArguments,
+    PlayerComparisonResult,
     PlayerResult,
     PlayerStatsResult,
     TopPlayerResult,
-    ComparePlayersArguments,
-    PlayerComparisonResult,
 )
 from app.services.player import PlayerNotFoundError, PlayerService
 
@@ -112,6 +112,22 @@ async def get_player_stats(
         arguments.player_name,
     )
 
+    print(
+        "GET_PLAYER_STATS arguments:",
+        arguments.model_dump(),
+    )
+
+    print(
+        "GET_PLAYER_STATS players:",
+        [
+            {
+                "id": player.id,
+                "name": player.name,
+            }
+            for player in players
+        ],
+    )
+
     results: list[PlayerStatsResult] = []
 
     for player in players:
@@ -120,8 +136,24 @@ async def get_player_stats(
                 player_id=player.id,
                 season=arguments.season,
             )
+
+            print(
+                "GET_PLAYER_STATS stats:",
+                {
+                    "player_id": player.id,
+                    "season": arguments.season,
+                    "stats_id": stats.id,
+                },
+            )
+
         except PlayerNotFoundError:
-            # Un jugador puede existir pero no tener datos para esa temporada.
+            print(
+                "GET_PLAYER_STATS missing stats:",
+                {
+                    "player_id": player.id,
+                    "season": arguments.season,
+                },
+            )
             continue
 
         results.append(
