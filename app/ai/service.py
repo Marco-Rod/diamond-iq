@@ -1,6 +1,12 @@
 import json
 from typing import Any
 
+from app.ai.limits import (
+    AIExecutionLimits,
+    TokenBudgetExceededError,
+    ToolCallLimitError,
+    ToolIterationLimitError,
+)
 from app.ai.prompts.system import SYSTEM_PROMPT
 from app.ai.router import LLMRouter
 from app.ai.schemas import (
@@ -16,14 +22,6 @@ from app.ai.tools.registry import ToolArgumentsError, ToolNotFoundError, ToolReg
 
 MAX_TOOL_ITERATIONS = 3
 
-
-class ToolIterationLimitError(RuntimeError):
-    """
-    Se produce cuando el modelo continúa solicitando tools después
-    de alcanzar el máximo de rondas permitido.
-
-    El límite evita loops indefinidos entre el LLM y las herramientas.
-    """
 
 
 class AIService:
@@ -42,12 +40,17 @@ class AIService:
     """
 
     def __init__(
-        self,
-        router: LLMRouter,
-        tool_registry: ToolRegistry,
+    self,
+    router: LLMRouter,
+    tool_registry: ToolRegistry,
+    limits: AIExecutionLimits | None = None,
     ) -> None:
         self.router = router
         self.tool_registry = tool_registry
+
+        # El valor por defecto mantiene los tests y usos simples cómodos,
+        # pero permite inyectar límites distintos por entorno.
+        self.limits = limits or AIExecutionLimits()
     
     def _build_tool_error_message(
     self,
@@ -156,7 +159,7 @@ class AIService:
         Limitamos el número de rondas para evitar que un modelo entre
         accidentalmente en un ciclo infinito de llamadas.
         """
-
+        
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
@@ -174,12 +177,15 @@ class AIService:
 
         total_input_tokens = 0
         total_output_tokens = 0
-
+        tool_call_count = 0
+        
         # MAX_TOOL_ITERATIONS limita las rondas que pueden ejecutar tools.
         #
         # Permitimos una llamada adicional al LLM después de la última
         # ronda para que pueda producir la respuesta final.
-        for iteration in range(MAX_TOOL_ITERATIONS + 1):
+        for iteration in range(
+            self.limits.max_tool_iterations + 1
+        ):
             llm_request = LLMRequest(
                 messages=messages,
                 temperature=0.2,
@@ -192,7 +198,31 @@ class AIService:
 
             total_input_tokens += llm_response.input_tokens
             total_output_tokens += llm_response.output_tokens
+            total_tokens = (
+                total_input_tokens
+                + total_output_tokens
+            )
+            tool_call_count += len(
+                llm_response.tool_calls
+            )
 
+            if (
+                tool_call_count
+                > self.limits.max_tool_calls_per_chat
+            ):
+                raise ToolCallLimitError(
+                    "The conversation exceeded the maximum "
+                    "number of tool calls."
+                )
+                
+            if (
+                llm_response.tool_calls
+                and total_tokens
+                >= self.limits.max_total_tokens_per_chat
+            ):
+                raise TokenBudgetExceededError(
+                    "The conversation exhausted its token budget."
+                )
             # Si el modelo ya no solicita ninguna herramienta,
             # consideramos que terminó su razonamiento y devolvemos
             # la respuesta final al cliente.
@@ -206,7 +236,7 @@ class AIService:
 
             # Si llegamos hasta aquí después de consumir todas las rondas
             # permitidas, no ejecutamos más tools.
-            if iteration >= MAX_TOOL_ITERATIONS:
+            if iteration >= self.limits.max_tool_iterations:
                 raise ToolIterationLimitError(
                     "The model exceeded the maximum number "
                     "of tool-calling iterations."

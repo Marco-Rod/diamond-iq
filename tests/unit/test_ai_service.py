@@ -9,8 +9,11 @@ from app.ai.schemas import (
 )
 from app.ai.service import (
     MAX_TOOL_ITERATIONS,
+    AIExecutionLimits,
     AIService,
+    TokenBudgetExceededError,
     ToolArgumentsError,
+    ToolCallLimitError,
     ToolIterationLimitError,
     ToolNotFoundError,
 )
@@ -599,3 +602,96 @@ async def test_chat_does_not_hide_unexpected_tool_errors() -> None:
                 message="Tell me about Ethan Carter."
             )
         )
+
+@pytest.mark.anyio
+async def test_chat_stops_when_tool_call_limit_is_exceeded() -> None:
+    router = AsyncMock()
+
+    tool_registry = Mock()
+    tool_registry.definitions = Mock(
+        return_value=[]
+    )
+    tool_registry.execute = AsyncMock()
+
+    router.generate.return_value = LLMResponse(
+        content=None,
+        provider="ollama",
+        model="qwen3:8b",
+        tool_calls=[
+            LLMToolCall(
+                name="get_player",
+                arguments={"player_name": "Player A"},
+            ),
+            LLMToolCall(
+                name="get_player",
+                arguments={"player_name": "Player B"},
+            ),
+        ],
+    )
+
+    service = AIService(
+        router=router,
+        tool_registry=tool_registry,
+        limits=AIExecutionLimits(
+            max_tool_iterations=3,
+            max_tool_calls_per_chat=1,
+            max_total_tokens_per_chat=12_000,
+        ),
+    )
+
+    with pytest.raises(ToolCallLimitError):
+        await service.chat(
+            ChatRequest(
+                message="Tell me about these players."
+            )
+        )
+
+    # El límite se comprueba antes de ejecutar ninguna tool.
+    tool_registry.execute.assert_not_awaited()
+
+@pytest.mark.anyio
+async def test_chat_stops_when_token_budget_is_exhausted() -> None:
+    router = AsyncMock()
+
+    tool_registry = Mock()
+    tool_registry.definitions = Mock(
+        return_value=[]
+    )
+    tool_registry.execute = AsyncMock()
+
+    router.generate.return_value = LLMResponse(
+        content=None,
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=900,
+        output_tokens=200,
+        tool_calls=[
+            LLMToolCall(
+                name="get_player",
+                arguments={
+                    "player_name": "Ethan Carter",
+                },
+            )
+        ],
+    )
+
+    service = AIService(
+        router=router,
+        tool_registry=tool_registry,
+        limits=AIExecutionLimits(
+            max_tool_iterations=3,
+            max_tool_calls_per_chat=6,
+            max_total_tokens_per_chat=1_000,
+        ),
+    )
+
+    with pytest.raises(
+        TokenBudgetExceededError
+    ):
+        await service.chat(
+            ChatRequest(
+                message="Tell me about Ethan Carter."
+            )
+        )
+
+    tool_registry.execute.assert_not_awaited()

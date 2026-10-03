@@ -82,3 +82,30 @@ def test_chat_rejects_empty_message() -> None:
     )
 
     assert response.status_code == 422
+
+def test_chat_returns_429_when_execution_limit_is_exceeded(
+    client: TestClient,
+) -> None:
+    service = AsyncMock()
+
+    service.chat.side_effect = ToolCallLimitError(
+        "The conversation exceeded the maximum number of tool calls."
+    )
+
+    app.dependency_overrides[get_ai_service] = lambda: service
+
+    response = client.post(
+        "/api/v1/ai/chat",
+        json={
+            "message": "Tell me about several players.",
+        },
+    )
+
+    assert response.status_code == 429
+
+    assert response.json() == {
+        "detail": (
+            "The conversation exceeded the maximum "
+            "number of tool calls."
+        )
+    }

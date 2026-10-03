@@ -7,6 +7,10 @@ class Settings(BaseSettings):
     app_name: str = "DiamondIQ"
     database_url: str
 
+    ai_max_tool_iterations: int = 3
+    ai_max_tool_calls_per_chat: int = 6
+    ai_max_total_tokens_per_chat: int = 12_000
+
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3:4b"
 
@@ -15,7 +19,7 @@ class Settings(BaseSettings):
 
     primary_llm_provider: str = "ollama"
     fallback_llm_provider: str | None = "openai"
-    
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
