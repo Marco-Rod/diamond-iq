@@ -120,23 +120,7 @@ class GeminiProvider:
             interaction_input = self._build_input(
                 request,
             )
-        print(
-            "GEMINI REQUEST:",
-            {
-                "model": self.model,
-                "previous_interaction_id": (
-                    previous_interaction_id
-                ),
-                "input": interaction_input,
-                "system_instruction": (
-                    system_instruction
-                ),
-                "tools_count": len(tools),
-                "generation_config": (
-                    generation_config
-                ),
-            },
-        )
+        
         try:
             interaction = (
                 await self.client.aio.interactions.create(
@@ -520,17 +504,7 @@ class GeminiProvider:
                     },
                 )
             )
-        print(
-            "GEMINI RESPONSE STATE:",
-            {
-                "interaction_id": (
-                    interaction_id
-                ),
-                "pending_tool_calls": (
-                    pending_tool_calls
-                ),
-            },
-        )
+        
         return LLMResponse(
             content=(
                 getattr(

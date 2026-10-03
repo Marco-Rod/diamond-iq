@@ -113,13 +113,7 @@ class LLMRouter:
             or provider_name
             or self.primary_provider
         )
-        print(
-            "LLM ROUTER:",
-            {
-                "selected_provider": selected_provider_name,
-                "fallback_provider": self.fallback_provider,
-            },
-        )
+
         provider = self.get_provider(
             selected_provider_name
         )

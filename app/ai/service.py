@@ -115,13 +115,6 @@ class AIService:
         tool_calls: list[dict[str, Any]] = []
 
         for tool_call in response.tool_calls:
-            print(
-                "TOOL CALL:",
-                {
-                    "name": tool_call.name,
-                    "arguments": tool_call.arguments,
-                },
-            )
 
             serialized_call: dict[str, Any] = {
                 "function": {
@@ -317,11 +310,6 @@ class AIService:
                     tool_result = await self.tool_registry.execute(
                         name=tool_call.name,
                         arguments=tool_call.arguments,
-                    )
-
-                    print(
-                        f"TOOL RESULT [{tool_call.name}]:",
-                        tool_result,
                     )
 
                 except ToolArgumentsError as exc:
