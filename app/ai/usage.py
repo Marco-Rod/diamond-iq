@@ -55,6 +55,7 @@ class LLMUsageTracker:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
+        
         event = LLMUsageEvent(
             conversation_id=conversation_id,
             provider=provider,
