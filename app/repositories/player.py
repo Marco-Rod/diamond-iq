@@ -235,3 +235,25 @@ class PlayerRepository:
         result = await self.session.execute(statement)
 
         return list(result.scalars().all())
+
+    async def get_stats_by_season(
+    self,
+    *,
+    player_id: int,
+    season: int,
+    ) -> PlayerSeasonStats | None:
+        """
+        Recupera las estadísticas de un jugador para una temporada concreta.
+
+        La combinación `(player_id, season)` es única en PostgreSQL, por lo
+        que esperamos como máximo una fila.
+        """
+
+        statement = select(PlayerSeasonStats).where(
+            PlayerSeasonStats.player_id == player_id,
+            PlayerSeasonStats.season == season,
+        )
+
+        result = await self.session.execute(statement)
+
+        return result.scalar_one_or_none()

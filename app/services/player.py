@@ -1,7 +1,7 @@
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Player
+from app.db.models import Player, PlayerSeasonStats
 from app.repositories.player import PlayerRepository
 from app.schemas.player import PlayerCreate
 
@@ -232,3 +232,26 @@ class PlayerService:
             max_power=max_power,
             limit=limit,
         )
+
+    async def get_player_stats_by_season(
+    self,
+    *,
+    player_id: int,
+    season: int,
+    ) -> PlayerSeasonStats:
+        """
+        Recupera estadísticas de temporada y convierte ausencia de datos
+        en un error de dominio.
+        """
+
+        stats = await self.repository.get_stats_by_season(
+            player_id=player_id,
+            season=season,
+        )
+
+        if stats is None:
+            raise PlayerNotFoundError(
+                f"Stats for player {player_id} in season {season} were not found."
+            )
+
+        return stats

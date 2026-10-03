@@ -127,15 +127,12 @@ class OllamaProvider:
             content=content or None,
             provider=self.provider_name,
             model=data.get("model", self.model),
-            # Ollama expone conteos de evaluación del prompt y generación.
-            # Los normalizamos a los mismos nombres que utilizará el resto
-            # del sistema independientemente del provider.
             input_tokens=data.get("prompt_eval_count", 0),
             output_tokens=data.get("eval_count", 0),
             finish_reason=data.get("done_reason"),
             tool_calls=tool_calls,
         )
-
+    
     def _normalize_tool_calls(
         self,
         raw_tool_calls: list[dict[str, Any]],

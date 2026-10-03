@@ -1,11 +1,15 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.dependencies import get_llm_router
 from app.ai.router import LLMRouter
 from app.ai.schemas import ChatRequest, ChatResponse
 from app.ai.service import AIService
+from app.ai.tools.registry import ToolRegistry
+from app.db.session import get_db_session
+from app.services.player import PlayerService
 
 router = APIRouter(
     prefix="/ai",
@@ -18,22 +22,28 @@ def get_ai_service(
         LLMRouter,
         Depends(get_llm_router),
     ],
+    session: Annotated[
+        AsyncSession,
+        Depends(get_db_session),
+    ],
 ) -> AIService:
     """
-    Construye AIService utilizando el router configurado para el entorno.
+    Construye AIService junto con sus dependencias.
 
-    FastAPI resuelve la cadena de dependencias automáticamente:
-
-    get_llm_router
-        ↓
-    LLMRouter
-        ↓
-    AIService
-        ↓
-    endpoint
+    La misma sesión SQLAlchemy podrá ser reutilizada por todas las tools
+    ejecutadas durante esta interacción.
     """
 
-    return AIService(router)
+    player_service = PlayerService(session)
+
+    tool_registry = ToolRegistry(
+        player_service=player_service,
+    )
+
+    return AIService(
+        router=router,
+        tool_registry=tool_registry,
+    )
 
 
 @router.post(

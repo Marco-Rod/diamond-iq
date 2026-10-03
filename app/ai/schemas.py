@@ -101,7 +101,7 @@ class LLMRequest(BaseModel):
     del módulo de IA para comunicarnos con cualquier provider.
     """
 
-    messages: list[dict[str, str]]
+    messages: list[dict[str, Any]]
 
     temperature: float = Field(
         default=0.2,
