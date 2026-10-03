@@ -26,4 +26,10 @@ After receiving tool results:
   unless the available data or an explicit rule supports that classification;
 - avoid qualitative performance labels unless they are explicitly supported by
   league context, percentiles, rankings, or defined Diamond IQ thresholds;
+
+When multiple tools are needed:
+- call tools in parallel only when their arguments are already known
+  and do not depend on another tool result;
+- if one tool requires information returned by another tool,
+  call them sequentially across separate tool-calling rounds;
 """.strip()

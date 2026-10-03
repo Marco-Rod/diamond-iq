@@ -13,7 +13,7 @@ from app.db.base import Base
 # `Base.metadata`. Aunque las clases no se usen directamente en este
 # archivo, el import es necesario para que Alembic pueda detectar
 # sus tablas y columnas.
-from app.db.models import Player, PlayerSeasonStats  # noqa: F401
+from app.db.models import LLMUsageEvent, Player, PlayerSeasonStats  # noqa: F401
 
 config = context.config
 

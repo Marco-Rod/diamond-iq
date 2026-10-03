@@ -9,6 +9,7 @@ from app.ai.router import LLMRouter
 from app.ai.schemas import ChatRequest, ChatResponse
 from app.ai.service import AIExecutionLimits, AIService
 from app.ai.tools.registry import ToolRegistry
+from app.ai.usage import LLMUsageTracker
 from app.core.config import get_settings
 from app.db.session import get_db_session
 from app.services.player import PlayerService
@@ -43,6 +44,9 @@ def get_ai_service(
         player_service=player_service,
     )
 
+    usage_tracker = LLMUsageTracker(
+        session=session,
+    )
     limits = AIExecutionLimits(
         max_tool_iterations=settings.ai_max_tool_iterations,
         max_tool_calls_per_chat=settings.ai_max_tool_calls_per_chat,
@@ -52,6 +56,7 @@ def get_ai_service(
     return AIService(
         router=router,
         tool_registry=tool_registry,
+        usage_tracker=usage_tracker,
         limits=limits,
     )
 

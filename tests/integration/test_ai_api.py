@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
+from app.ai.limits import ToolCallLimitError
 from app.ai.schemas import (
     ChatResponse,
     ProviderMetadata,
@@ -83,9 +84,7 @@ def test_chat_rejects_empty_message() -> None:
 
     assert response.status_code == 422
 
-def test_chat_returns_429_when_execution_limit_is_exceeded(
-    client: TestClient,
-) -> None:
+def test_chat_returns_429_when_execution_limit_is_exceeded() -> None:
     service = AsyncMock()
 
     service.chat.side_effect = ToolCallLimitError(
@@ -93,6 +92,8 @@ def test_chat_returns_429_when_execution_limit_is_exceeded(
     )
 
     app.dependency_overrides[get_ai_service] = lambda: service
+
+    client = TestClient(app)
 
     response = client.post(
         "/api/v1/ai/chat",
@@ -109,3 +110,5 @@ def test_chat_returns_429_when_execution_limit_is_exceeded(
             "number of tool calls."
         )
     }
+
+    app.dependency_overrides.clear()

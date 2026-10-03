@@ -17,6 +17,11 @@ from app.ai.service import (
     ToolIterationLimitError,
     ToolNotFoundError,
 )
+from app.ai.tools.exceptions import (
+    ToolArgumentsError,
+    ToolNotFoundError,
+    ToolResultNotFoundError,
+)
 
 
 @pytest.mark.anyio
@@ -28,7 +33,7 @@ async def test_chat_returns_direct_response_without_tool_call() -> None:
         return_value=[],
     )
     tool_registry.execute = AsyncMock()
-
+    usage_tracker = AsyncMock()
     router.generate.return_value = LLMResponse(
         content="Baseball is a bat-and-ball sport.",
         provider="ollama",
@@ -41,6 +46,7 @@ async def test_chat_returns_direct_response_without_tool_call() -> None:
     service = AIService(
         router=router,
         tool_registry=tool_registry,
+        usage_tracker=usage_tracker,
     )
 
     response = await service.chat(
@@ -118,7 +124,7 @@ async def test_chat_executes_tool_and_requests_final_response() -> None:
         first_response,
         final_response,
     ]
-
+    usage_tracker = AsyncMock()
     tool_registry.execute.return_value = [
         {
             "id": 1,
@@ -134,6 +140,7 @@ async def test_chat_executes_tool_and_requests_final_response() -> None:
     service = AIService(
         router=router,
         tool_registry=tool_registry,
+         usage_tracker=usage_tracker,
     )
 
     response = await service.chat(
@@ -223,7 +230,7 @@ async def test_chat_executes_multiple_tool_calls_in_same_iteration() -> None:
         first_response,
         final_response,
     ]
-
+    usage_tracker = AsyncMock()
     tool_registry.execute.side_effect = [
         [
             {
@@ -240,6 +247,7 @@ async def test_chat_executes_multiple_tool_calls_in_same_iteration() -> None:
     service = AIService(
         router=router,
         tool_registry=tool_registry,
+        usage_tracker=usage_tracker,
     )
 
     response = await service.chat(
@@ -316,7 +324,7 @@ async def test_chat_can_request_another_tool_in_next_iteration() -> None:
         second_response,
         final_response,
     ]
-
+    usage_tracker = AsyncMock()
     tool_registry.execute.side_effect = [
         [{"name": "Ethan Carter"}],
         [
@@ -330,6 +338,7 @@ async def test_chat_can_request_another_tool_in_next_iteration() -> None:
     service = AIService(
         router=router,
         tool_registry=tool_registry,
+        usage_tracker=usage_tracker,
     )
 
     response = await service.chat(
@@ -361,7 +370,7 @@ async def test_chat_stops_after_maximum_tool_iterations() -> None:
     tool_registry.execute = AsyncMock(
         return_value=[]
     )
-
+    usage_tracker = AsyncMock()
     endless_tool_response = LLMResponse(
         content=None,
         provider="ollama",
@@ -384,6 +393,7 @@ async def test_chat_stops_after_maximum_tool_iterations() -> None:
     service = AIService(
         router=router,
         tool_registry=tool_registry,
+        usage_tracker=usage_tracker,
     )
 
     with pytest.raises(ToolIterationLimitError):
@@ -457,7 +467,7 @@ async def test_chat_can_recover_from_invalid_tool_arguments() -> None:
         corrected_call,
         final_response,
     ]
-
+    usage_tracker = AsyncMock()
     tool_registry.execute.side_effect = [
         ToolArgumentsError(
             "Invalid metric 'salary'."
@@ -474,6 +484,7 @@ async def test_chat_can_recover_from_invalid_tool_arguments() -> None:
     service = AIService(
         router=router,
         tool_registry=tool_registry,
+        usage_tracker=usage_tracker,
     )
 
     response = await service.chat(
@@ -533,7 +544,7 @@ async def test_chat_can_recover_from_unknown_tool() -> None:
         unknown_tool_response,
         final_response,
     ]
-
+    usage_tracker = AsyncMock()
     tool_registry.execute.side_effect = ToolNotFoundError(
         "Unknown tool 'get_player_salary'."
     )
@@ -541,6 +552,7 @@ async def test_chat_can_recover_from_unknown_tool() -> None:
     service = AIService(
         router=router,
         tool_registry=tool_registry,
+        usage_tracker=usage_tracker
     )
 
     response = await service.chat(
@@ -570,7 +582,7 @@ async def test_chat_does_not_hide_unexpected_tool_errors() -> None:
             "Database connection lost."
         )
     )
-
+    usage_tracker = AsyncMock()
     router.generate.return_value = LLMResponse(
         content=None,
         provider="ollama",
@@ -591,6 +603,7 @@ async def test_chat_does_not_hide_unexpected_tool_errors() -> None:
     service = AIService(
         router=router,
         tool_registry=tool_registry,
+        usage_tracker=usage_tracker,
     )
 
     with pytest.raises(
@@ -612,7 +625,7 @@ async def test_chat_stops_when_tool_call_limit_is_exceeded() -> None:
         return_value=[]
     )
     tool_registry.execute = AsyncMock()
-
+    usage_tracker = AsyncMock()
     router.generate.return_value = LLMResponse(
         content=None,
         provider="ollama",
@@ -637,6 +650,7 @@ async def test_chat_stops_when_tool_call_limit_is_exceeded() -> None:
             max_tool_calls_per_chat=1,
             max_total_tokens_per_chat=12_000,
         ),
+        usage_tracker=usage_tracker,
     )
 
     with pytest.raises(ToolCallLimitError):
@@ -658,7 +672,7 @@ async def test_chat_stops_when_token_budget_is_exhausted() -> None:
         return_value=[]
     )
     tool_registry.execute = AsyncMock()
-
+    usage_tracker = AsyncMock()
     router.generate.return_value = LLMResponse(
         content=None,
         provider="ollama",
@@ -683,6 +697,7 @@ async def test_chat_stops_when_token_budget_is_exhausted() -> None:
             max_tool_calls_per_chat=6,
             max_total_tokens_per_chat=1_000,
         ),
+        usage_tracker=usage_tracker,
     )
 
     with pytest.raises(
@@ -695,3 +710,129 @@ async def test_chat_stops_when_token_budget_is_exhausted() -> None:
         )
 
     tool_registry.execute.assert_not_awaited()
+
+@pytest.mark.anyio
+async def test_chat_can_recover_from_tool_result_not_found() -> None:
+    router = AsyncMock()
+
+    tool_registry = Mock()
+    tool_registry.definitions = Mock(
+        return_value=[]
+    )
+    tool_registry.execute = AsyncMock()
+
+    usage_tracker = AsyncMock()
+
+    first_response = LLMResponse(
+        content=None,
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=100,
+        output_tokens=20,
+        tool_calls=[
+            LLMToolCall(
+                name="get_top_players",
+                arguments={
+                    "metric": "power",
+                    "team": "LAD",
+                    "limit": 1,
+                },
+            ),
+            LLMToolCall(
+                name="get_player_stats",
+                arguments={
+                    "player_name": "X",
+                    "season": 2026,
+                },
+            ),
+        ],
+    )
+
+    corrected_response = LLMResponse(
+        content=None,
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=150,
+        output_tokens=25,
+        tool_calls=[
+            LLMToolCall(
+                name="get_player_stats",
+                arguments={
+                    "player_name": "Mateo Rivera",
+                    "season": 2026,
+                },
+            )
+        ],
+    )
+
+    final_response = LLMResponse(
+        content="Mateo Rivera had 51 home runs in 2026.",
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=180,
+        output_tokens=30,
+    )
+
+    router.generate.side_effect = [
+        first_response,
+        corrected_response,
+        final_response,
+    ]
+
+    tool_registry.execute.side_effect = [
+        # get_top_players
+        [
+            {
+                "name": "Mateo Rivera",
+                "metric": "power",
+                "value": 98,
+            }
+        ],
+
+        # get_player_stats("X")
+        ToolResultNotFoundError(
+            "No player was found with name 'X'."
+        ),
+
+        # corrected get_player_stats
+        [
+            {
+                "name": "Mateo Rivera",
+                "season": 2026,
+                "home_runs": 51,
+            }
+        ],
+    ]
+
+    service = AIService(
+        router=router,
+        tool_registry=tool_registry,
+        usage_tracker=usage_tracker,
+    )
+
+    response = await service.chat(
+        ChatRequest(
+            message=(
+                "Who has the highest Power on the Dodgers, "
+                "and how did that player perform in 2026?"
+            )
+        )
+    )
+
+    assert router.generate.await_count == 3
+    assert tool_registry.execute.await_count == 3
+
+    assert response.answer == (
+        "Mateo Rivera had 51 home runs in 2026."
+    )
+
+    assert [
+        execution.success
+        for execution in response.tools_used
+    ] == [
+        True,
+        False,
+        True,
+    ]
+
+    assert response.tools_used[1].error == "result_not_found"

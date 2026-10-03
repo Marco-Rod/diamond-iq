@@ -1,3 +1,4 @@
+from app.ai.tools.exceptions import ToolResultNotFoundError
 from app.ai.tools.schemas import (
     ComparePlayersArguments,
     GetPlayerArguments,
@@ -80,6 +81,10 @@ async def get_player(
     players = await player_service.find_players_by_name(
         arguments.player_name,
     )
+    if not players:
+        raise ToolResultNotFoundError(
+            f"No player was found with name '{arguments.player_name}'."
+        )
 
     return [
         PlayerResult(
@@ -103,15 +108,21 @@ async def get_player_stats(
     player_service: PlayerService,
 ) -> list[PlayerStatsResult]:
     """
-    Recupera estadísticas de temporada utilizando el nombre del jugador.
+    Recupera estadísticas de temporada para jugadores que coincidan
+    con el nombre solicitado.
 
-    El resultado es una lista porque el nombre puede ser ambiguo.
+    Un nombre inexistente se considera un error recuperable de tool,
+    porque el LLM puede corregirlo utilizando contexto de otra llamada.
     """
 
     players = await player_service.find_players_by_name(
         arguments.player_name,
     )
 
+    if not players:
+        raise ToolResultNotFoundError(
+            f"No player was found with name '{arguments.player_name}'."
+        )
 
     results: list[PlayerStatsResult] = []
 
@@ -144,7 +155,12 @@ async def get_player_stats(
                 woba=stats.woba,
             )
         )
-
+    if not results:
+        raise ToolResultNotFoundError(
+            f"No statistics were found for "
+            f"'{arguments.player_name}' in season {arguments.season}."
+        )
+    
     return results
 
 async def compare_players(

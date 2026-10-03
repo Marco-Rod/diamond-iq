@@ -1,5 +1,6 @@
 import json
 from typing import Any
+from uuid import uuid4
 
 from app.ai.limits import (
     AIExecutionLimits,
@@ -18,7 +19,13 @@ from app.ai.schemas import (
     ToolExecution,
     UsageInfo,
 )
-from app.ai.tools.registry import ToolArgumentsError, ToolNotFoundError, ToolRegistry
+from app.ai.tools.exceptions import (
+    ToolArgumentsError,
+    ToolNotFoundError,
+    ToolResultNotFoundError,
+)
+from app.ai.tools.registry import ToolRegistry
+from app.ai.usage import LLMUsageTracker
 
 MAX_TOOL_ITERATIONS = 3
 
@@ -38,16 +45,17 @@ class AIService:
 
     El LLM nunca ejecuta directamente lógica de negocio ni SQL.
     """
-
+    
     def __init__(
     self,
     router: LLMRouter,
     tool_registry: ToolRegistry,
+    usage_tracker: LLMUsageTracker,
     limits: AIExecutionLimits | None = None,
     ) -> None:
         self.router = router
         self.tool_registry = tool_registry
-
+        self.usage_tracker = usage_tracker
         # El valor por defecto mantiene los tests y usos simples cómodos,
         # pero permite inyectar límites distintos por entorno.
         self.limits = limits or AIExecutionLimits()
@@ -99,6 +107,13 @@ class AIService:
         tool_calls: list[dict[str, Any]] = []
 
         for tool_call in response.tool_calls:
+            print(
+                "TOOL CALL:",
+                {
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                },
+            )
             serialized_call: dict[str, Any] = {
                 "function": {
                     "name": tool_call.name,
@@ -111,7 +126,7 @@ class AIService:
             # a generarlo.
             if tool_call.id is not None:
                 serialized_call["id"] = tool_call.id
-
+            
             tool_calls.append(serialized_call)
 
         return {
@@ -159,7 +174,8 @@ class AIService:
         Limitamos el número de rondas para evitar que un modelo entre
         accidentalmente en un ciclo infinito de llamadas.
         """
-        
+        conversation_id = str(uuid4())
+
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
@@ -196,6 +212,17 @@ class AIService:
                 llm_request,
             )
 
+            await self.usage_tracker.record_call(
+                conversation_id=conversation_id,
+                provider=llm_response.provider,
+                model=llm_response.model,
+                input_tokens=llm_response.input_tokens,
+                output_tokens=llm_response.output_tokens,
+                tool_calls_requested=len(
+                    llm_response.tool_calls
+                ),
+            )
+            
             total_input_tokens += llm_response.input_tokens
             total_output_tokens += llm_response.output_tokens
             total_tokens = (
@@ -257,7 +284,10 @@ class AIService:
                         name=tool_call.name,
                         arguments=tool_call.arguments,
                     )
-
+                    print(
+                        f"TOOL RESULT [{tool_call.name}]:",
+                        tool_result,
+                    )
                 except ToolArgumentsError as exc:
                     """
                     El modelo utilizó una tool existente, pero construyó
@@ -311,6 +341,32 @@ class AIService:
 
                     continue
 
+                except ToolResultNotFoundError as exc:
+                    """
+                    La tool era válida, pero no pudo encontrar la entidad o información
+                    solicitada.
+
+                    Se devuelve el error al modelo para permitirle corregir su siguiente
+                    acción utilizando el historial disponible.
+                    """
+
+                    tool_executions.append(
+                        ToolExecution(
+                            name=tool_call.name,
+                            success=False,
+                            error="result_not_found",
+                        )
+                    )
+
+                    messages.append(
+                        self._build_tool_error_message(
+                            tool_name=tool_call.name,
+                            error_type="result_not_found",
+                            message=str(exc),
+                        )
+                    )
+
+                    continue
                 # Cualquier excepción distinta a las anteriores se propaga.
                 #
                 # Eso es deliberado: no debemos convertir un bug, una caída

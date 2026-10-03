@@ -2,6 +2,11 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from app.ai.tools.exceptions import (
+    ToolArgumentsError,
+    ToolNotFoundError,
+    ToolResultNotFoundError,
+)
 from app.ai.tools.players import (
     compare_players,
     get_player,
@@ -64,19 +69,6 @@ COMPARE_PLAYERS_DEFINITION: dict[str, Any] = {
         "parameters": ComparePlayersArguments.model_json_schema(),
     },
 }
-
-class ToolNotFoundError(Exception):
-    """
-    Se lanza cuando el modelo solicita una tool que Diamond IQ
-    no tiene registrada.
-    """
-
-
-class ToolArgumentsError(Exception):
-    """
-    Se lanza cuando los argumentos generados por el modelo no cumplen
-    el schema definido para la tool.
-    """
 
 
 class ToolRegistry:
