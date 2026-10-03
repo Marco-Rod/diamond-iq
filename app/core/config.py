@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     primary_llm_provider: str = "ollama"
     fallback_llm_provider: str | None = "openai"
 
+    llm_max_retries: int = 1
+    llm_retry_delay_seconds: float = 0.5
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

@@ -58,4 +58,6 @@ def get_llm_router() -> LLMRouter:
         providers=providers,
         primary_provider=settings.primary_llm_provider,
         fallback_provider=fallback_provider,
+        max_retries=settings.llm_max_retries,
+        retry_delay_seconds=settings.llm_retry_delay_seconds,
     )

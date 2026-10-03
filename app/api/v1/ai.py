@@ -5,6 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.dependencies import get_llm_router
 from app.ai.limits import AIExecutionLimitError
+from app.ai.providers.exceptions import (
+    LLMProviderTransientError,
+)
 from app.ai.router import LLMRouter
 from app.ai.schemas import ChatRequest, ChatResponse
 from app.ai.service import AIExecutionLimits, AIService
@@ -72,12 +75,6 @@ async def chat(
         Depends(get_ai_service),
     ],
 ) -> ChatResponse:
-    """
-    Procesa una conversación con el asistente.
-
-    Los límites de ejecución son condiciones controladas de consumo,
-    no errores internos del servidor.
-    """
     try:
         return await service.chat(request)
 
@@ -85,4 +82,12 @@ async def chat(
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=str(exc),
+        ) from exc
+
+    except LLMProviderTransientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "The AI provider is temporarily unavailable."
+            ),
         ) from exc

@@ -3,6 +3,9 @@ from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
 
 from app.ai.limits import ToolCallLimitError
+from app.ai.providers.exceptions import (
+    LLMProviderUnavailableError,
+)
 from app.ai.schemas import (
     ChatResponse,
     ProviderMetadata,
@@ -108,6 +111,38 @@ def test_chat_returns_429_when_execution_limit_is_exceeded() -> None:
         "detail": (
             "The conversation exceeded the maximum "
             "number of tool calls."
+        )
+    }
+
+    app.dependency_overrides.clear()
+
+def test_chat_returns_503_when_provider_is_unavailable() -> None:
+    service = AsyncMock()
+
+    service.chat.side_effect = (
+        LLMProviderUnavailableError(
+            "Could not connect to Ollama."
+        )
+    )
+
+    app.dependency_overrides[
+        get_ai_service
+    ] = lambda: service
+
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/ai/chat",
+        json={
+            "message": "Tell me about Ethan Carter.",
+        },
+    )
+
+    assert response.status_code == 503
+
+    assert response.json() == {
+        "detail": (
+            "The AI provider is temporarily unavailable."
         )
     }
 

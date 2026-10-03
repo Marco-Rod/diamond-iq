@@ -2,6 +2,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.ai.providers.exceptions import (
+    LLMProviderPermanentError,
+    LLMProviderTimeoutError,
+)
 from app.ai.router import (
     LLMProviderNotFoundError,
     LLMRouter,
@@ -127,3 +131,165 @@ async def test_router_rejects_unknown_requested_provider() -> None:
             build_request(),
             provider_name="unknown",
         )
+
+@pytest.mark.anyio
+async def test_router_retries_transient_provider_error() -> None:
+    provider = AsyncMock()
+
+    provider.generate.side_effect = [
+        LLMProviderTimeoutError(
+            "Provider timed out."
+        ),
+        LLMResponse(
+            content="Recovered.",
+            provider="ollama",
+            model="qwen3:8b",
+        ),
+    ]
+
+    router = LLMRouter(
+        providers={
+            "ollama": provider,
+        },
+        primary_provider="ollama",
+        max_retries=1,
+        retry_delay_seconds=0,
+    )
+
+    response = await router.generate(
+        LLMRequest(
+            messages=[
+                {
+                    "role": "user",
+                    "content": "Hello",
+                }
+            ]
+        )
+    )
+
+    assert response.content == "Recovered."
+
+    assert provider.generate.await_count == 2
+
+@pytest.mark.anyio
+async def test_router_does_not_retry_permanent_error() -> None:
+    provider = AsyncMock()
+
+    provider.generate.side_effect = (
+        LLMProviderPermanentError(
+            "Invalid model."
+        )
+    )
+
+    router = LLMRouter(
+        providers={
+            "ollama": provider,
+        },
+        primary_provider="ollama",
+        max_retries=3,
+        retry_delay_seconds=0,
+    )
+
+    with pytest.raises(
+        LLMProviderPermanentError
+    ):
+        await router.generate(
+            LLMRequest(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "Hello",
+                    }
+                ]
+            )
+        )
+
+    # Aunque configuramos 3 retries,
+    # un error permanente solo se intenta una vez.
+    assert provider.generate.await_count == 1
+
+@pytest.mark.anyio
+async def test_router_falls_back_after_transient_failures() -> None:
+    primary = AsyncMock()
+    fallback = AsyncMock()
+
+    primary.generate.side_effect = (
+        LLMProviderTimeoutError(
+            "Ollama timed out."
+        )
+    )
+
+    fallback.generate.return_value = LLMResponse(
+        content="Fallback response.",
+        provider="fallback",
+        model="fallback-model",
+    )
+
+    router = LLMRouter(
+        providers={
+            "ollama": primary,
+            "fallback": fallback,
+        },
+        primary_provider="ollama",
+        fallback_provider="fallback",
+        max_retries=1,
+        retry_delay_seconds=0,
+    )
+
+    response = await router.generate(
+        LLMRequest(
+            messages=[
+                {
+                    "role": "user",
+                    "content": "Hello",
+                }
+            ]
+        )
+    )
+
+    assert response.provider == "fallback"
+
+    # Intento original + retry.
+    assert primary.generate.await_count == 2
+
+    # Después usamos fallback.
+    fallback.generate.assert_awaited_once()
+
+@pytest.mark.anyio
+async def test_explicit_provider_does_not_use_fallback() -> None:
+    primary = AsyncMock()
+    fallback = AsyncMock()
+
+    primary.generate.side_effect = (
+        LLMProviderTimeoutError(
+            "Ollama timed out."
+        )
+    )
+
+    router = LLMRouter(
+        providers={
+            "ollama": primary,
+            "fallback": fallback,
+        },
+        primary_provider="ollama",
+        fallback_provider="fallback",
+        max_retries=0,
+        retry_delay_seconds=0,
+    )
+
+    with pytest.raises(
+        LLMProviderTimeoutError
+    ):
+        await router.generate(
+            LLMRequest(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "Hello",
+                    }
+                ]
+            ),
+            provider_name="ollama",
+        )
+
+    fallback.generate.assert_not_awaited()

@@ -2,6 +2,11 @@ from typing import Any
 
 import httpx
 
+from app.ai.providers.exceptions import (
+    LLMProviderPermanentError,
+    LLMProviderTimeoutError,
+    LLMProviderUnavailableError,
+)
 from app.ai.schemas import (
     LLMRequest,
     LLMResponse,
@@ -62,19 +67,45 @@ class OllamaProvider:
 
         payload = self._build_payload(request)
 
-        async with httpx.AsyncClient(
-            timeout=self.timeout_seconds,
-        ) as client:
-            response = await client.post(
-                f"{self.base_url}/api/chat",
-                json=payload,
-            )
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.timeout_seconds,
+            ) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/chat",
+                    json=payload,
+                )
 
-            # Convierte respuestas HTTP 4xx/5xx en excepciones de httpx.
-            #
-            # Más adelante el LLM Router decidirá cuáles errores deben
-            # producir retry, fallback o propagarse.
-            response.raise_for_status()
+                response.raise_for_status()
+
+        except httpx.TimeoutException as exc:
+            raise LLMProviderTimeoutError(
+                f"Ollama timed out after {self.timeout_seconds} seconds."
+            ) from exc
+
+        except httpx.ConnectError as exc:
+            raise LLMProviderUnavailableError(
+                "Could not connect to Ollama."
+            ) from exc
+
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+
+            # Rate limiting o errores del servidor suelen ser temporales.
+            if status_code == 429 or status_code >= 500:
+                raise LLMProviderUnavailableError(
+                    f"Ollama returned transient HTTP {status_code}."
+                ) from exc
+
+            # 4xx como modelo inexistente, payload inválido, etc.
+            raise LLMProviderPermanentError(
+                f"Ollama returned HTTP {status_code}."
+            ) from exc
+
+        except httpx.RequestError as exc:
+            raise LLMProviderUnavailableError(
+                "Ollama request failed."
+            ) from exc
 
         data = response.json()
 
