@@ -130,7 +130,8 @@ class ToolRegistry:
                 )
             except ValidationError as exc:
                 raise ToolArgumentsError(
-                    f"Invalid arguments for tool '{name}'."
+                    f"Invalid arguments for tool '{name}': "
+                    f"{exc.errors(include_url=False)}"
                 ) from exc
 
             result = await get_top_players(

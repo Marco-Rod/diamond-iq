@@ -46,17 +46,17 @@ class UsageInfo(BaseModel):
     )
 
 
-class ToolExecution(BaseModel): 
+class ToolExecution(BaseModel):
     """
-    Describe una tool utilizada durante una interacción.
+    Registro público de una tool ejecutada durante la conversación.
 
-    En esta fase todavía no ejecutaremos tools, pero definimos el contrato
-    desde ahora para evitar cambiar el response público cuando añadamos
-    tool calling posteriormente.
+    `error` solamente contiene información segura y de alto nivel.
+    Nunca debemos exponer stack traces, SQL o detalles internos.
     """
 
     name: str
     success: bool = True
+    error: str | None = None
 
 
 class ProviderMetadata(BaseModel):

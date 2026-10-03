@@ -7,7 +7,13 @@ from app.ai.schemas import (
     LLMResponse,
     LLMToolCall,
 )
-from app.ai.service import MAX_TOOL_ITERATIONS, AIService, ToolIterationLimitError
+from app.ai.service import (
+    MAX_TOOL_ITERATIONS,
+    AIService,
+    ToolArgumentsError,
+    ToolIterationLimitError,
+    ToolNotFoundError,
+)
 
 
 @pytest.mark.anyio
@@ -385,3 +391,211 @@ async def test_chat_stops_after_maximum_tool_iterations() -> None:
         )
 
     assert tool_registry.execute.await_count == MAX_TOOL_ITERATIONS
+
+
+@pytest.mark.anyio
+async def test_chat_can_recover_from_invalid_tool_arguments() -> None:
+    router = AsyncMock()
+
+    tool_registry = Mock()
+    tool_registry.definitions = Mock(
+        return_value=[]
+    )
+    tool_registry.execute = AsyncMock()
+
+    invalid_call = LLMResponse(
+        content=None,
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=100,
+        output_tokens=20,
+        tool_calls=[
+            LLMToolCall(
+                id=None,
+                name="get_top_players",
+                arguments={
+                    "metric": "salary",
+                    "team": "NYY",
+                    "limit": 3,
+                },
+            )
+        ],
+    )
+
+    corrected_call = LLMResponse(
+        content=None,
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=120,
+        output_tokens=20,
+        tool_calls=[
+            LLMToolCall(
+                id=None,
+                name="get_top_players",
+                arguments={
+                    "metric": "power",
+                    "team": "NYY",
+                    "limit": 3,
+                },
+            )
+        ],
+    )
+
+    final_response = LLMResponse(
+        content="The Yankees players with the highest Power are...",
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=150,
+        output_tokens=30,
+    )
+
+    router.generate.side_effect = [
+        invalid_call,
+        corrected_call,
+        final_response,
+    ]
+
+    tool_registry.execute.side_effect = [
+        ToolArgumentsError(
+            "Invalid metric 'salary'."
+        ),
+        [
+            {
+                "name": "Aaron Judge",
+                "metric": "power",
+                "value": 99,
+            }
+        ],
+    ]
+
+    service = AIService(
+        router=router,
+        tool_registry=tool_registry,
+    )
+
+    response = await service.chat(
+        ChatRequest(
+            message="Who has the highest salary on the Yankees?"
+        )
+    )
+
+    assert router.generate.await_count == 3
+    assert tool_registry.execute.await_count == 2
+
+    assert len(response.tools_used) == 2
+
+    assert response.tools_used[0].success is False
+    assert response.tools_used[0].error == "invalid_arguments"
+
+    assert response.tools_used[1].success is True
+
+@pytest.mark.anyio
+async def test_chat_can_recover_from_unknown_tool() -> None:
+    router = AsyncMock()
+
+    tool_registry = Mock()
+    tool_registry.definitions = Mock(
+        return_value=[]
+    )
+    tool_registry.execute = AsyncMock()
+
+    unknown_tool_response = LLMResponse(
+        content=None,
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=50,
+        output_tokens=10,
+        tool_calls=[
+            LLMToolCall(
+                id=None,
+                name="get_player_salary",
+                arguments={
+                    "player_name": "Ethan Carter",
+                },
+            )
+        ],
+    )
+
+    final_response = LLMResponse(
+        content=(
+            "Diamond IQ does not provide salary information."
+        ),
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=80,
+        output_tokens=20,
+    )
+
+    router.generate.side_effect = [
+        unknown_tool_response,
+        final_response,
+    ]
+
+    tool_registry.execute.side_effect = ToolNotFoundError(
+        "Unknown tool 'get_player_salary'."
+    )
+
+    service = AIService(
+        router=router,
+        tool_registry=tool_registry,
+    )
+
+    response = await service.chat(
+        ChatRequest(
+            message="What is Ethan Carter's salary?"
+        )
+    )
+
+    assert response.answer == (
+        "Diamond IQ does not provide salary information."
+    )
+
+    assert response.tools_used[0].success is False
+    assert response.tools_used[0].error == "tool_not_found"
+
+@pytest.mark.anyio
+async def test_chat_does_not_hide_unexpected_tool_errors() -> None:
+    router = AsyncMock()
+
+    tool_registry = Mock()
+    tool_registry.definitions = Mock(
+        return_value=[]
+    )
+
+    tool_registry.execute = AsyncMock(
+        side_effect=RuntimeError(
+            "Database connection lost."
+        )
+    )
+
+    router.generate.return_value = LLMResponse(
+        content=None,
+        provider="ollama",
+        model="qwen3:8b",
+        input_tokens=50,
+        output_tokens=10,
+        tool_calls=[
+            LLMToolCall(
+                id=None,
+                name="get_player",
+                arguments={
+                    "player_name": "Ethan Carter",
+                },
+            )
+        ],
+    )
+
+    service = AIService(
+        router=router,
+        tool_registry=tool_registry,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Database connection lost",
+    ):
+        await service.chat(
+            ChatRequest(
+                message="Tell me about Ethan Carter."
+            )
+        )

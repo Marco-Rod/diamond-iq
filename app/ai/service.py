@@ -12,7 +12,7 @@ from app.ai.schemas import (
     ToolExecution,
     UsageInfo,
 )
-from app.ai.tools.registry import ToolRegistry
+from app.ai.tools.registry import ToolArgumentsError, ToolNotFoundError, ToolRegistry
 
 MAX_TOOL_ITERATIONS = 3
 
@@ -48,7 +48,39 @@ class AIService:
     ) -> None:
         self.router = router
         self.tool_registry = tool_registry
+    
+    def _build_tool_error_message(
+    self,
+    *,
+    tool_name: str,
+    error_type: str,
+    message: str,
+    ) -> dict[str, Any]:
+        """
+        Construye un resultado de tool recuperable para el LLM.
 
+        El error se envía como datos estructurados para que el modelo
+        pueda decidir si debe corregir argumentos, utilizar otra tool
+        o explicar que no puede completar la solicitud.
+
+        Nunca debe utilizarse para excepciones internas inesperadas.
+        """
+
+        return {
+            "role": "tool",
+            "content": json.dumps(
+                {
+                    "ok": False,
+                    "error": {
+                        "type": error_type,
+                        "tool": tool_name,
+                        "message": message,
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        }
+    
     def _build_assistant_tool_message(
     self,
     response: LLMResponse,
@@ -190,10 +222,69 @@ class AIService:
 
             # Una misma respuesta del modelo puede solicitar varias tools.
             for tool_call in llm_response.tool_calls:
-                tool_result = await self.tool_registry.execute(
-                    name=tool_call.name,
-                    arguments=tool_call.arguments,
-                )
+                try:
+                    tool_result = await self.tool_registry.execute(
+                        name=tool_call.name,
+                        arguments=tool_call.arguments,
+                    )
+
+                except ToolArgumentsError as exc:
+                    """
+                    El modelo utilizó una tool existente, pero construyó
+                    argumentos que no cumplen su contrato.
+
+                    Es un error recuperable: devolvemos la información al LLM
+                    para darle oportunidad de corregir su siguiente llamada.
+                    """
+
+                    tool_executions.append(
+                        ToolExecution(
+                            name=tool_call.name,
+                            success=False,
+                            error="invalid_arguments",
+                        )
+                    )
+
+                    messages.append(
+                        self._build_tool_error_message(
+                            tool_name=tool_call.name,
+                            error_type="invalid_arguments",
+                            message=str(exc),
+                        )
+                    )
+
+                    continue
+
+                except ToolNotFoundError as exc:
+                    """
+                    El modelo solicitó una tool que nuestro registry no expone.
+
+                    También es recuperable: podemos indicarle cuáles son sus
+                    capacidades reales en lugar de provocar un HTTP 500.
+                    """
+
+                    tool_executions.append(
+                        ToolExecution(
+                            name=tool_call.name,
+                            success=False,
+                            error="tool_not_found",
+                        )
+                    )
+
+                    messages.append(
+                        self._build_tool_error_message(
+                            tool_name=tool_call.name,
+                            error_type="tool_not_found",
+                            message=str(exc),
+                        )
+                    )
+
+                    continue
+
+                # Cualquier excepción distinta a las anteriores se propaga.
+                #
+                # Eso es deliberado: no debemos convertir un bug, una caída
+                # de PostgreSQL o un error inesperado en "tool not found".
                 tool_executions.append(
                     ToolExecution(
                         name=tool_call.name,
@@ -201,12 +292,14 @@ class AIService:
                     )
                 )
 
-                # Cada resultado se incorpora como un mensaje independiente.
                 messages.append(
                     {
                         "role": "tool",
                         "content": json.dumps(
-                            tool_result,
+                            {
+                                "ok": True,
+                                "result": tool_result,
+                            },
                             ensure_ascii=False,
                         ),
                     }
