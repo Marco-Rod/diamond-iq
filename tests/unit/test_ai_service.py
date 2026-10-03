@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from app.ai.guardrails import AIGuardrails
 from app.ai.schemas import (
     ChatRequest,
     LLMResponse,
@@ -34,6 +35,7 @@ async def test_chat_returns_direct_response_without_tool_call() -> None:
     )
     tool_registry.execute = AsyncMock()
     usage_tracker = AsyncMock()
+    guardrails = Mock(spec=AIGuardrails)
     router.generate.return_value = LLMResponse(
         content="Baseball is a bat-and-ball sport.",
         provider="ollama",
@@ -47,6 +49,7 @@ async def test_chat_returns_direct_response_without_tool_call() -> None:
         router=router,
         tool_registry=tool_registry,
         usage_tracker=usage_tracker,
+        guardrails=guardrails
     )
 
     response = await service.chat(
@@ -125,6 +128,7 @@ async def test_chat_executes_tool_and_requests_final_response() -> None:
         final_response,
     ]
     usage_tracker = AsyncMock()
+    guardrails = Mock(spec=AIGuardrails)
     tool_registry.execute.return_value = [
         {
             "id": 1,
@@ -141,6 +145,7 @@ async def test_chat_executes_tool_and_requests_final_response() -> None:
         router=router,
         tool_registry=tool_registry,
          usage_tracker=usage_tracker,
+         guardrails=guardrails
     )
 
     response = await service.chat(
@@ -231,6 +236,7 @@ async def test_chat_executes_multiple_tool_calls_in_same_iteration() -> None:
         final_response,
     ]
     usage_tracker = AsyncMock()
+    guardrails = Mock(spec=AIGuardrails)
     tool_registry.execute.side_effect = [
         [
             {
@@ -248,6 +254,7 @@ async def test_chat_executes_multiple_tool_calls_in_same_iteration() -> None:
         router=router,
         tool_registry=tool_registry,
         usage_tracker=usage_tracker,
+        guardrails=guardrails
     )
 
     response = await service.chat(
@@ -325,6 +332,7 @@ async def test_chat_can_request_another_tool_in_next_iteration() -> None:
         final_response,
     ]
     usage_tracker = AsyncMock()
+    guardrails = Mock(spec=AIGuardrails)
     tool_registry.execute.side_effect = [
         [{"name": "Ethan Carter"}],
         [
@@ -339,6 +347,7 @@ async def test_chat_can_request_another_tool_in_next_iteration() -> None:
         router=router,
         tool_registry=tool_registry,
         usage_tracker=usage_tracker,
+        guardrails=guardrails
     )
 
     response = await service.chat(
@@ -371,6 +380,7 @@ async def test_chat_stops_after_maximum_tool_iterations() -> None:
         return_value=[]
     )
     usage_tracker = AsyncMock()
+    guardrails = Mock(spec=AIGuardrails)
     endless_tool_response = LLMResponse(
         content=None,
         provider="ollama",
@@ -394,6 +404,7 @@ async def test_chat_stops_after_maximum_tool_iterations() -> None:
         router=router,
         tool_registry=tool_registry,
         usage_tracker=usage_tracker,
+        guardrails=guardrails
     )
 
     with pytest.raises(ToolIterationLimitError):
@@ -468,6 +479,7 @@ async def test_chat_can_recover_from_invalid_tool_arguments() -> None:
         final_response,
     ]
     usage_tracker = AsyncMock()
+    guardrails = Mock(spec=AIGuardrails)
     tool_registry.execute.side_effect = [
         ToolArgumentsError(
             "Invalid metric 'salary'."
@@ -485,6 +497,7 @@ async def test_chat_can_recover_from_invalid_tool_arguments() -> None:
         router=router,
         tool_registry=tool_registry,
         usage_tracker=usage_tracker,
+        guardrails=guardrails
     )
 
     response = await service.chat(
@@ -545,6 +558,7 @@ async def test_chat_can_recover_from_unknown_tool() -> None:
         final_response,
     ]
     usage_tracker = AsyncMock()
+    guardrails = Mock(spec=AIGuardrails)
     tool_registry.execute.side_effect = ToolNotFoundError(
         "Unknown tool 'get_player_salary'."
     )
@@ -552,7 +566,8 @@ async def test_chat_can_recover_from_unknown_tool() -> None:
     service = AIService(
         router=router,
         tool_registry=tool_registry,
-        usage_tracker=usage_tracker
+        usage_tracker=usage_tracker,
+        guardrails=guardrails
     )
 
     response = await service.chat(
@@ -583,6 +598,7 @@ async def test_chat_does_not_hide_unexpected_tool_errors() -> None:
         )
     )
     usage_tracker = AsyncMock()
+    guardrails = Mock(spec=AIGuardrails)
     router.generate.return_value = LLMResponse(
         content=None,
         provider="ollama",
@@ -604,6 +620,7 @@ async def test_chat_does_not_hide_unexpected_tool_errors() -> None:
         router=router,
         tool_registry=tool_registry,
         usage_tracker=usage_tracker,
+        guardrails=guardrails
     )
 
     with pytest.raises(
@@ -626,6 +643,7 @@ async def test_chat_stops_when_tool_call_limit_is_exceeded() -> None:
     )
     tool_registry.execute = AsyncMock()
     usage_tracker = AsyncMock()
+    guardrails = Mock(spec=AIGuardrails)
     router.generate.return_value = LLMResponse(
         content=None,
         provider="ollama",
@@ -650,6 +668,7 @@ async def test_chat_stops_when_tool_call_limit_is_exceeded() -> None:
             max_tool_calls_per_chat=1,
             max_total_tokens_per_chat=12_000,
         ),
+        guardrails=guardrails,
         usage_tracker=usage_tracker,
     )
 
@@ -673,6 +692,7 @@ async def test_chat_stops_when_token_budget_is_exhausted() -> None:
     )
     tool_registry.execute = AsyncMock()
     usage_tracker = AsyncMock()
+    guardrails = Mock(spec=AIGuardrails)
     router.generate.return_value = LLMResponse(
         content=None,
         provider="ollama",
@@ -697,6 +717,7 @@ async def test_chat_stops_when_token_budget_is_exhausted() -> None:
             max_tool_calls_per_chat=6,
             max_total_tokens_per_chat=1_000,
         ),
+        guardrails=guardrails,
         usage_tracker=usage_tracker,
     )
 
@@ -803,11 +824,13 @@ async def test_chat_can_recover_from_tool_result_not_found() -> None:
             }
         ],
     ]
+    guardrails = Mock(spec=AIGuardrails)
 
     service = AIService(
         router=router,
         tool_registry=tool_registry,
         usage_tracker=usage_tracker,
+        guardrails=guardrails,
     )
 
     response = await service.chat(

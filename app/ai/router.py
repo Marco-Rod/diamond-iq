@@ -68,18 +68,72 @@ class LLMRouter:
             self._validate_provider(fallback_provider)
 
     async def generate(
-    self,
-    request: LLMRequest,
-    provider_name: str | None = None,
+        self,
+        request: LLMRequest,
+        provider_name: str | None = None,
     ) -> LLMResponse:
-        selected_provider_name = (
-            provider_name
-            or self.primary_provider
+        """
+        Selecciona el provider que atenderá la petición.
+
+        Reglas:
+
+        1. Si existe provider_state, el provider propietario de ese
+        estado conserva el control de la conversación.
+
+        2. Si el caller especifica explícitamente un provider,
+        respetamos esa selección.
+
+        3. En una conversación nueva usamos el provider primario.
+
+        4. El fallback automático solo aplica cuando todavía no existe
+        estado perteneciente a un provider.
+        """
+
+        state_provider_name = (
+            request.provider_state.provider
+            if request.provider_state
+            else None
         )
 
+        # Evitamos que un caller intente continuar estado perteneciente
+        # a Gemini utilizando otro provider distinto.
+        if (
+            provider_name is not None
+            and state_provider_name is not None
+            and provider_name
+            != state_provider_name
+        ):
+            raise ValueError(
+                "Explicit provider does not match "
+                "the provider that owns the current state."
+            )
+
+        selected_provider_name = (
+            state_provider_name
+            or provider_name
+            or self.primary_provider
+        )
+        print(
+            "LLM ROUTER:",
+            {
+                "selected_provider": selected_provider_name,
+                "fallback_provider": self.fallback_provider,
+            },
+        )
         provider = self.get_provider(
             selected_provider_name
         )
+
+        # Si ya existe estado del provider, la conversación está
+        # vinculada a ese provider.
+        #
+        # No intentamos fallback hacia otro porque ese otro provider
+        # no conocería el contexto específico almacenado en el state.
+        if state_provider_name is not None:
+            return await self._generate_with_retry(
+                provider=provider,
+                request=request,
+            )
 
         try:
             return await self._generate_with_retry(
@@ -88,16 +142,14 @@ class LLMRouter:
             )
 
         except LLMProviderTransientError:
-            # Si el caller pidió explícitamente un provider,
-            # respetamos esa decisión y no hacemos fallback automático.
+            # Cuando el caller pidió explícitamente un provider,
+            # respetamos su decisión y no hacemos fallback silencioso.
             if provider_name is not None:
                 raise
 
-            # Sin fallback configurado no hay nada más que intentar.
             if self.fallback_provider is None:
                 raise
 
-            # Evitamos intentar exactamente el mismo provider otra vez.
             if (
                 self.fallback_provider
                 == selected_provider_name
@@ -112,6 +164,7 @@ class LLMRouter:
                 provider=fallback,
                 request=request,
             )
+
     def get_provider(
         self,
         provider_name: str,

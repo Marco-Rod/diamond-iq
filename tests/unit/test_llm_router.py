@@ -11,6 +11,7 @@ from app.ai.router import (
     LLMRouter,
 )
 from app.ai.schemas import (
+    LLMProviderState,
     LLMRequest,
     LLMResponse,
 )
@@ -293,3 +294,133 @@ async def test_explicit_provider_does_not_use_fallback() -> None:
         )
 
     fallback.generate.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_router_keeps_provider_that_owns_state() -> None:
+    """
+    Verifica que una conversación iniciada por Gemini
+    continúe utilizando Gemini aunque Ollama sea el
+    provider primario.
+
+    Esto es necesario porque el estado interno de Gemini
+    no puede ser interpretado por otro provider.
+    """
+
+    ollama = AsyncMock()
+    gemini = AsyncMock()
+
+    gemini.generate.return_value = (
+        LLMResponse(
+            content="Continued.",
+            provider="gemini",
+            model=(
+                "gemini-3.8-flash"
+            ),
+        )
+    )
+
+    router = LLMRouter(
+        providers={
+            "ollama": ollama,
+            "gemini": gemini,
+        },
+        primary_provider="ollama",
+        fallback_provider="gemini",
+        max_retries=0,
+        retry_delay_seconds=0,
+    )
+
+    request = LLMRequest(
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "Continue."
+                ),
+            }
+        ],
+        tools=[],
+        provider_state=(
+            LLMProviderState(
+                provider="gemini",
+                data={
+                    "interaction_id": (
+                        "interaction-123"
+                    ),
+                },
+            )
+        ),
+    )
+
+    response = await router.generate(
+        request,
+    )
+
+    assert (
+        response.provider
+        == "gemini"
+    )
+
+    # Ollama es el provider primario, pero no debe participar
+    # porque Gemini es propietario del estado actual.
+    ollama.generate.assert_not_awaited()
+
+    gemini.generate.assert_awaited_once_with(
+        request
+    )
+
+@pytest.mark.anyio
+async def test_router_rejects_explicit_provider_that_does_not_own_state() -> None:
+    """
+    Evita continuar una conversación utilizando un provider
+    diferente al que creó el estado actual.
+    """
+
+    ollama = AsyncMock()
+    gemini = AsyncMock()
+
+    router = LLMRouter(
+        providers={
+            "ollama": ollama,
+            "gemini": gemini,
+        },
+        primary_provider="ollama",
+        fallback_provider="gemini",
+        max_retries=0,
+        retry_delay_seconds=0,
+    )
+
+    request = LLMRequest(
+        messages=[
+            {
+                "role": "user",
+                "content": "Continue.",
+            }
+        ],
+        tools=[],
+        provider_state=(
+            LLMProviderState(
+                provider="gemini",
+                data={
+                    "interaction_id": (
+                        "interaction-123"
+                    ),
+                },
+            )
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Explicit provider does not match"
+        ),
+    ):
+        await router.generate(
+            request,
+            provider_name="ollama",
+        )
+
+    ollama.generate.assert_not_awaited()
+    gemini.generate.assert_not_awaited()

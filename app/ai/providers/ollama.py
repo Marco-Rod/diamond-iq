@@ -52,7 +52,13 @@ class OllamaProvider:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_seconds = timeout_seconds
-
+        print(
+            "OLLAMA REQUEST:",
+            {
+                "base_url": self.base_url,
+                "model": self.model,
+            },
+        )
     async def generate(
         self,
         request: LLMRequest,

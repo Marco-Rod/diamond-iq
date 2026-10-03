@@ -13,6 +13,7 @@ from app.ai.router import LLMRouter
 from app.ai.schemas import (
     ChatRequest,
     ChatResponse,
+    LLMProviderState,
     LLMRequest,
     LLMResponse,
     ProviderMetadata,
@@ -25,6 +26,7 @@ from app.ai.tools.exceptions import (
     ToolResultNotFoundError,
 )
 from app.ai.tools.registry import ToolRegistry
+from app.ai.guardrails import AIGuardrails
 from app.ai.usage import LLMUsageTracker
 
 MAX_TOOL_ITERATIONS = 3
@@ -51,11 +53,14 @@ class AIService:
     router: LLMRouter,
     tool_registry: ToolRegistry,
     usage_tracker: LLMUsageTracker,
+    guardrails: AIGuardrails,
     limits: AIExecutionLimits | None = None,
     ) -> None:
         self.router = router
         self.tool_registry = tool_registry
         self.usage_tracker = usage_tracker
+        self.temperature = 0.2
+        self.guardrails = guardrails
         # El valor por defecto mantiene los tests y usos simples cómodos,
         # pero permite inyectar límites distintos por entorno.
         self.limits = limits or AIExecutionLimits()
@@ -175,7 +180,15 @@ class AIService:
         accidentalmente en un ciclo infinito de llamadas.
         """
         conversation_id = str(uuid4())
-
+        # Estado específico del provider que esté controlando
+        # la conversación actual.
+        #
+        # AIService únicamente lo transporta entre llamadas:
+        # nunca debe interpretar su contenido.
+        provider_state: LLMProviderState | None = None
+        self.guardrails.validate_input(
+            request.message
+        )
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
@@ -204,14 +217,21 @@ class AIService:
         ):
             llm_request = LLMRequest(
                 messages=messages,
-                temperature=0.2,
-                tools=tool_definitions,
+                temperature=self.temperature,
+                tools=self.tool_registry.definitions(),
+                provider_state=provider_state,
             )
 
             llm_response = await self.router.generate(
                 llm_request,
             )
-
+            # Conservamos el estado devuelto por el provider.
+            #
+            # Por ejemplo, Gemini puede guardar aquí su interaction_id.
+            # AIService no necesita saber qué representa.
+            provider_state = (
+                llm_response.provider_state
+            )
             await self.usage_tracker.record_call(
                 conversation_id=conversation_id,
                 provider=llm_response.provider,
@@ -269,6 +289,9 @@ class AIService:
                     "of tool-calling iterations."
                 )
 
+            self.guardrails.validate_output(
+                llm_response.content
+            )
             # Primero registramos en el historial qué tools solicitó
             # el asistente.
             messages.append(
@@ -381,12 +404,18 @@ class AIService:
                 messages.append(
                     {
                         "role": "tool",
+
+                        # Conservamos el ID de la llamada original.
+                        #
+                        # Providers stateful como Gemini necesitan asociar
+                        # cada resultado con el function_call exacto que
+                        # originó la ejecución.
+                        "tool_call_id": tool_call.id,
+
+                        "name": tool_call.name,
                         "content": json.dumps(
-                            {
-                                "ok": True,
-                                "result": tool_result,
-                            },
-                            ensure_ascii=False,
+                            tool_result,
+                            default=str,
                         ),
                     }
                 )

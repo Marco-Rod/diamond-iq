@@ -93,65 +93,101 @@ class ChatResponse(BaseModel):
     )
 
 
+class LLMToolCall(BaseModel):
+    """
+    Representa una llamada a una tool solicitada por un modelo.
+
+    Este schema es neutral respecto al provider. Ollama, Gemini,
+    OpenAI u otros providers deben convertir sus formatos nativos
+    a esta estructura antes de devolver la respuesta al resto
+    de Diamond IQ.
+    """
+
+    id: str | None = None
+    name: str
+    arguments: dict[str, Any] = Field(
+        default_factory=dict,
+    )
+
+class LLMProviderState(BaseModel):
+    """
+    Estado opaco perteneciente a un provider específico.
+
+    Diamond IQ puede transportar este estado entre llamadas al LLM,
+    pero las capas superiores, como AIService, no deben interpretar
+    el contenido de `data`.
+
+    Cada provider decide qué información necesita conservar.
+
+    Ejemplo para Gemini:
+
+        {
+            "provider": "gemini",
+            "data": {
+                "interaction_id": "abc123",
+                "pending_tool_calls": {
+                    "call_1": "get_player_stats"
+                }
+            }
+        }
+
+    Esto permite conservar información específica del provider sin
+    acoplar AIService o LLMRouter a detalles internos de Gemini.
+    """
+
+    provider: str
+
+    data: dict[str, Any] = Field(
+        default_factory=dict,
+    )
+
+
 class LLMRequest(BaseModel):
     """
-    Representación interna de una petición hacia un modelo.
+    Petición neutral enviada a cualquier provider de LLM.
 
-    Este contrato no pertenece a la API pública. Se utiliza dentro
-    del módulo de IA para comunicarnos con cualquier provider.
+    Cada adapter es responsable de traducir esta estructura
+    al formato particular que requiere su API.
     """
 
     messages: list[dict[str, Any]]
 
-    temperature: float = Field(
-        default=0.2,
-        ge=0,
-        le=2,
-    )
+    temperature: float = 0.2
 
     tools: list[dict[str, Any]] = Field(
         default_factory=list,
     )
 
+    # Estado opcional utilizado para continuar una conversación
+    # cuyo contexto pertenece a un provider específico.
+    provider_state: LLMProviderState | None = None
 
-class LLMToolCall(BaseModel):
-    """
-    Representación normalizada de una solicitud de tool realizada
-    por un modelo.
-
-    Ollama y OpenAI pueden expresar tool calls de forma distinta,
-    pero Diamond IQ utilizará este formato común internamente.
-    """
-
-    id: str | None = None
-    name: str
-    arguments: dict[str, Any]
 
 
 class LLMResponse(BaseModel):
     """
-    Respuesta interna normalizada de cualquier proveedor LLM.
+    Respuesta normalizada producida por cualquier provider.
 
-    Esta estructura evita propagar objetos específicos de SDKs externos
-    hacia AIService, Router o la API.
+    Gracias a este contrato común, AIService no necesita conocer
+    las diferencias entre Ollama, Gemini, OpenAI, etc.
     """
 
     content: str | None = None
 
     provider: str
+
     model: str
 
-    input_tokens: int = Field(
-        default=0,
-        ge=0,
-    )
-    output_tokens: int = Field(
-        default=0,
-        ge=0,
-    )
+    input_tokens: int = 0
+
+    output_tokens: int = 0
 
     finish_reason: str | None = None
 
     tool_calls: list[LLMToolCall] = Field(
         default_factory=list,
     )
+
+    # Si el provider necesita conservar contexto específico entre
+    # llamadas, puede devolverlo aquí.
+    provider_state: LLMProviderState | None = None
